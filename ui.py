@@ -393,7 +393,8 @@ class App:
                 rows = [dict(r) for r in fetch_filtered(cfg, db)]
             finally:
                 db.close()
-            odl = oblicz_odleglosci(cfg, rows, log=lambda m: self._q.put(("log", m)),
+            okno = report_mod.tylko_w_oknie(rows, date.today(), kat)
+            odl = oblicz_odleglosci(cfg, okno, log=lambda m: self._q.put(("log", m)),
                                     progress=lambda d, t: self._q.put(("progress", (d, t))))
             rows = report_mod.filtruj_po_km(rows, odl, cfg.max_km)
             rows, also_on = report_mod.deduplikuj(rows)

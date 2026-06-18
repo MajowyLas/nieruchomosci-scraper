@@ -59,7 +59,7 @@ portale:                  # zakomentuj (#) te, których nie chcesz
   - nieruchomosci-online
   - tarnowiak
 max_stron: 3              # ile stron wyników pobrać z każdego portalu
-opoznienie: 1.5           # sekundy między zapytaniami (uprzejmość wobec serwerów)
+opoznienie: 1.0           # sekundy między zapytaniami w obrębie portalu (grzeczność)
 okazja_prog_procent: 85   # próg okazji: cena/m² < 85% mediany (≥15% taniej)
 lokalizacja_odniesienia:  # adres/miasto do liczenia km (puste = od miasta)
 max_km:                   # promień w km od punktu odniesienia (puste = bez limitu)
@@ -183,6 +183,20 @@ bez klucza). Kilka uwag:
   **przybliżona** — najlepiej sprawdza się do odróżnienia ofert „w mieście" od tych
   w okolicznych miejscowościach.
 - Wymaga połączenia z internetem (tak jak samo scrapowanie).
+
+## Wydajność
+
+Pobieranie jest **równoległe**, żeby nie czekać w nieskończoność:
+
+- **Scrapowanie** uruchamia wszystkie pary (portal × typ) naraz — mieszkania i domy
+  z różnych portali pobierają się jednocześnie (pełne odświeżenie ~20 s zamiast ~60 s).
+- **Pogłębianie** (zdjęcia + opisy) pobiera kilka ofert naraz (pula 6 wątków).
+- **Geokodowanie** liczy odległości tylko dla ofert z **wyświetlanej kategorii**
+  (np. „ostatnie 3 dni"), a nie dla całej bazy — i buforuje wyniki.
+
+Pauza `opoznienie` dotyczy zapytań *w obrębie jednego portalu* (grzeczność wobec
+serwera); różne portale i tak chodzą równolegle. Zapisy do bazy idą jednym wątkiem
+(wymóg SQLite), więc dane się nie mieszają.
 
 ## Szczegóły ofert i zdjęcia
 

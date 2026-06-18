@@ -213,6 +213,12 @@ def wybierz_oferty(rows, dzis: date, kategoria: str, tylko_okazje: bool = False,
     return wybrane, mediany
 
 
+def tylko_w_oknie(rows, dzis: date, kategoria: str) -> list:
+    """Zwraca tylko oferty z danego okna czasowego (dzis/3dni/7dni/wszystkie).
+    Uzywane, by geokodowac WYLACZNIE wyswietlane oferty - oszczedza zapytania."""
+    return [r for r in rows if naleznik_do_okna(_data_pierwszego(r), dzis, kategoria)]
+
+
 def filtruj_po_km(rows: list[sqlite3.Row], odleglosci: dict, max_km: Optional[float]) -> list[sqlite3.Row]:
     """Usuwa oferty dalej niz max_km. Oferty bez znanej odleglosci zostawiamy."""
     if not max_km or not odleglosci:

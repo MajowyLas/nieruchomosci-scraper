@@ -40,20 +40,23 @@ class BaseScraper:
                 break
             yield resp.text
 
+    def scrape_one_type(self, ptype: str) -> list[Listing]:
+        """Scrapuje pojedynczy typ (mieszkanie/dom). Wydzielone, by mozna bylo
+        scrapowac typy rownolegle."""
+        collected: dict[tuple[str, str], Listing] = {}
+        for html in self.iter_pages(ptype):
+            items = self.parse_listings(html, ptype)
+            if not items:
+                break  # pusta strona = koniec wynikow
+            for it in items:
+                collected.setdefault(it.key(), it)
+        return list(collected.values())
+
     def scrape(self) -> list[Listing]:
-        """Pelne scrapowanie portalu wg konfiguracji."""
+        """Pelne scrapowanie portalu wg konfiguracji (wszystkie typy).
+        Zapisujemy WSZYSTKO - filtry po cenie/metrazu/pokojach sa na etapie raportu."""
         collected: dict[tuple[str, str], Listing] = {}
         for ptype in self.config.typy:
-            empty_pages = 0
-            for html in self.iter_pages(ptype):
-                items = self.parse_listings(html, ptype)
-                if not items:
-                    empty_pages += 1
-                    if empty_pages >= 1:  # pusta strona = koniec wynikow
-                        break
-                    continue
-                for it in items:
-                    collected.setdefault(it.key(), it)
-        # Zapisujemy WSZYSTKO - filtrowanie po cenie/metrazu/pokojach odbywa sie
-        # na etapie raportu, dzieki czemu mozna zmieniac parametry bez re-scrapingu.
+            for it in self.scrape_one_type(ptype):
+                collected.setdefault(it.key(), it)
         return list(collected.values())

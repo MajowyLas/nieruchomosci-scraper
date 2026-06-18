@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import sqlite3
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
 from pathlib import Path
 from typing import Callable
@@ -10,12 +11,15 @@ from typing import Callable
 import requests
 
 from .config import load_config, Config
-from .http import HttpClient
+from .http import HttpClient, _DEFAULT_HEADERS
 from .storage import Database
 from .sites import SCRAPERS
 from .geo import Geocoder, policz_odleglosci
 from .detail import extract_detail, pobierz_zdjecia
 from . import report as report_mod
+
+# ile podstron ofert pobierac naraz przy poglebianiu (kompromis szybkosc/grzecznosc)
+DETAL_WATKI = 6
 
 
 def _enable_windows_ansi() -> None:
@@ -32,30 +36,37 @@ def _enable_windows_ansi() -> None:
 
 def run_scrape(cfg: Config, db: Database, log: Callable[[str], None] = print,
                progress=None) -> None:
-    """Scrapuje portale i zapisuje do bazy. `log` przekierowuje komunikaty,
-    `progress(done, total)` raportuje postep (co portal)."""
-    client = HttpClient(delay=cfg.opoznienie)
-    log(f"Scrapuje portale: {', '.join(cfg.portale)}")
-    log(f"Miasto: {cfg.miasto} | typy: {', '.join(cfg.typy)} | max stron: {cfg.max_stron}")
-    suma_nowe, suma_znane = 0, 0
-    razem = len(cfg.portale)
-    for idx, nazwa in enumerate(cfg.portale, 1):
-        klasa = SCRAPERS.get(nazwa)
-        if not klasa:
-            log(f"  [!] Nieznany portal '{nazwa}' - pomijam")
-            if progress:
-                progress(idx, razem)
-            continue
+    """Scrapuje portale RÓWNOLEGLE (kazdy na osobnym watku) i zapisuje do bazy.
+    Rozne portale = rozne serwery, wiec rownoleglosc jest bezpieczna; wewnatrz
+    portalu zostaje grzeczna pauza. Zapis do bazy robimy w jednym watku."""
+    log(f"Scrapuje rownolegle: {', '.join(cfg.portale)} (typy: {', '.join(cfg.typy)})")
+    log(f"Miasto: {cfg.miasto} | max stron: {cfg.max_stron}")
+    # zadania na poziomie (portal, typ) - mieszkania i domy z tego samego portalu ida naraz
+    zadania = [(n, t) for n in cfg.portale if SCRAPERS.get(n) for t in cfg.typy]
+    razem = len(zadania)
+
+    def scrape_zadanie(nazwa, ptype):
         try:
-            oferty = klasa(client, cfg).scrape()
-            stat = db.upsert_many(oferty)
-            suma_nowe += stat["nowe"]
-            suma_znane += stat["znane"]
-            log(f"  {nazwa}: pobrano {len(oferty)} (nowe: {stat['nowe']}, znane: {stat['znane']})")
-        except Exception as e:  # jeden portal nie moze polozyc calego scrapowania
-            log(f"  {nazwa}: BLAD: {type(e).__name__}: {e}")
-        if progress:
-            progress(idx, razem)
+            client = HttpClient(delay=cfg.opoznienie)  # osobny klient = osobna pauza
+            return nazwa, SCRAPERS[nazwa](client, cfg).scrape_one_type(ptype), None
+        except Exception as e:
+            return nazwa, None, f"{type(e).__name__}: {e}"
+
+    suma_nowe = suma_znane = done = 0
+    with ThreadPoolExecutor(max_workers=min(razem, 8)) as ex:
+        futs = [ex.submit(scrape_zadanie, n, t) for n, t in zadania]
+        for fut in as_completed(futs):
+            nazwa, oferty, err = fut.result()
+            if err:
+                log(f"  {nazwa}: BLAD: {err}")
+            else:
+                stat = db.upsert_many(oferty)  # zapis w watku wywolujacym (1 polaczenie)
+                suma_nowe += stat["nowe"]
+                suma_znane += stat["znane"]
+                log(f"  {nazwa}: +{len(oferty)} (nowe: {stat['nowe']})")
+            done += 1
+            if progress:
+                progress(done, razem)
     log(f"Razem: {suma_nowe} nowych, {suma_znane} znanych ofert zapisanych do bazy.")
 
 
@@ -79,25 +90,38 @@ def fetch_details(cfg: Config, db: Database, rows, log: Callable[[str], None] = 
     if not do_pobrania:
         log("Wszystkie oferty maja juz pobrane szczegoly.")
         return 0
-    client = HttpClient(delay=cfg.opoznienie)
-    foto = requests.Session()
     razem = len(do_pobrania)
-    log(f"Poglebianie {razem} ofert (podstrona + zdjecia)...")
-    zrobione = 0
-    for i, r in enumerate(do_pobrania, 1):
-        resp = client.get(r["url"])
-        if resp is not None and resp.status_code == 200:
+    log(f"Poglebianie {razem} ofert rownolegle ({DETAL_WATKI} naraz)...")
+    sesja = requests.Session()
+    sesja.headers.update(_DEFAULT_HEADERS)
+
+    def zadanie(r):
+        try:
+            resp = sesja.get(r["url"], timeout=25)
+            if resp.status_code != 200:
+                return r, None
             det = extract_detail(resp.text, r["site"], r["url"])
             if pobieraj_zdjecia and det["image_urls"]:
                 dest = Path("data/photos") / f"{r['site']}_{r['listing_id']}"
-                pobierz_zdjecia(det["image_urls"], dest, session=foto)
+                pobierz_zdjecia(det["image_urls"], dest, session=sesja)
                 det["photos_dir"] = str(dest)
-            db.update_detail(r["site"], r["listing_id"], det)
-            zrobione += 1
-        if progress:
-            progress(i, razem)
-        if i % 5 == 0 or i == razem:
-            log(f"  ...{i}/{razem}")
+            return r, det
+        except Exception:
+            return r, None
+
+    done = zrobione = 0
+    with ThreadPoolExecutor(max_workers=DETAL_WATKI) as ex:
+        futs = [ex.submit(zadanie, r) for r in do_pobrania]
+        for fut in as_completed(futs):
+            r, det = fut.result()
+            if det is not None:
+                db.update_detail(r["site"], r["listing_id"], det)  # zapis w 1 watku
+                zrobione += 1
+            done += 1
+            if progress:
+                progress(done, razem)
+            if done % 10 == 0 or done == razem:
+                log(f"  ...{done}/{razem}")
     log(f"Poglebiono {zrobione} ofert.")
     return zrobione
 
@@ -128,7 +152,9 @@ def run_report(cfg: Config, db: Database, kategoria: str, zapisz: str | None,
     rows = fetch_filtered(cfg, db)
     dzis = date.today()
     prog = cfg.okazja_prog_procent
-    odleglosci = oblicz_odleglosci(cfg, rows, log=print)
+    # geokodujemy tylko oferty z wyswietlanej kategorii (oszczednosc zapytan)
+    okno = report_mod.tylko_w_oknie(rows, dzis, kategoria)
+    odleglosci = oblicz_odleglosci(cfg, okno, log=print)
     rows = report_mod.filtruj_po_km(rows, odleglosci, cfg.max_km)
     rows, also_on = report_mod.deduplikuj(rows)
     if not bez_kolorow:

@@ -19,7 +19,7 @@ class Config:
     pokoje_max: Optional[int] = None
     portale: list[str] = field(default_factory=lambda: ["olx", "gratka", "nieruchomosci-online", "tarnowiak"])
     max_stron: int = 3
-    opoznienie: float = 1.5
+    opoznienie: float = 1.0
     okazja_prog_procent: float = 85.0
     lokalizacja_odniesienia: Optional[str] = None
     max_km: Optional[float] = None  # maksymalna odleglosc od punktu odniesienia
@@ -47,7 +47,7 @@ def load_config(path: str | Path = "config.yaml") -> Config:
         pokoje_max=_as_int(raw.get("pokoje_max")),
         portale=[str(s).strip().lower() for s in (raw.get("portale") or [])],
         max_stron=int(raw.get("max_stron", 3)),
-        opoznienie=float(raw.get("opoznienie", 1.5)),
+        opoznienie=float(raw.get("opoznienie", 1.0)),
         okazja_prog_procent=float(raw.get("okazja_prog_procent", 85)),
         lokalizacja_odniesienia=(str(raw["lokalizacja_odniesienia"]).strip()
                                  if raw.get("lokalizacja_odniesienia") else None),
