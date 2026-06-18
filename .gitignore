@@ -1,0 +1,25 @@
+# Wirtualne srodowisko
+.venv/
+venv/
+
+# Baza danych i raporty (dane lokalne)
+*.db
+*.sqlite3
+data/
+raporty/
+reports/
+
+# Pliki zwiadowcze (tymczasowe)
+recon*.py
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Narzedzia sesji / IDE / OS
+.claude/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

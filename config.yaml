@@ -1,0 +1,38 @@
+# ============================================================
+#  Konfiguracja scrapera nieruchomosci
+#  Edytuj ten plik, aby zmienic parametry wyszukiwania.
+# ============================================================
+
+# Miasto / lokalizacja (slug uzywany w adresach URL portali).
+# Przyklady: tarnow, krakow, rzeszow, warszawa
+miasto: tarnow
+
+# Typy nieruchomosci do scrapowania: mieszkanie i/lub dom
+typy:
+  - mieszkanie
+  - dom
+
+# Rodzaj transakcji (na razie obslugiwana: sprzedaz)
+transakcja: sprzedaz
+
+# Filtry ceny (zostaw puste = bez limitu). Wartosci w zlotych.
+cena_min:
+cena_max:
+
+# Portale do przeszukania. Zakomentuj (#) te, ktorych nie chcesz.
+portale:
+  - olx
+  - gratka
+  - nieruchomosci-online
+  - tarnowiak
+
+# Ile stron wynikow pobrac z kazdego portalu (1 strona ~ 30-50 ofert).
+max_stron: 3
+
+# Odstep miedzy zapytaniami w sekundach (uprzejmosc wobec serwerow).
+opoznienie: 1.5
+
+# Prog "okazji": oferta jest okazja, gdy jej cena za m2 jest ponizej tego
+# procentu mediany dla danego typu. 85 = co najmniej 15% taniej niz mediana.
+# Nizsza wartosc = surowsze kryterium (mniej, ale lepszych okazji).
+okazja_prog_procent: 85
