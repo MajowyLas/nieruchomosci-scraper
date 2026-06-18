@@ -46,6 +46,9 @@ def miejscowosc_z_tytulu(title: str) -> str:
     m = re.search(r"[-–]\s*" + _MIEJSCE + r"\s*$", t.strip())    # 'Dom ... - Tuchów'
     if m and _czysta(m.group(1)):
         return m.group(1) + ", małopolskie"
+    m = re.search(_MIEJSCE + r"\s*$", t.strip())                 # miejscowosc na koncu ('... Lubcza')
+    if m and _czysta(m.group(1)):
+        return m.group(1) + ", małopolskie"
     return "Tarnów"
 # slowa kluczowe potwierdzajace, ze oferta jest z danej kategorii
 _KEYWORDS = {

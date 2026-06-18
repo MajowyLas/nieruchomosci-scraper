@@ -9,9 +9,10 @@ Obsługiwane portale:
 | Portal | Data dodania na liście? | Uwagi |
 |--------|:----:|-------|
 | **OLX** | tak (*odświeżenie*) | data oznacza moment odświeżenia oferty, nie dodania |
+| **Otodom** | tak | dane z osadzonego JSON (cena, metraż, działka, pokoje, data) |
 | **Gratka** | tak | podaje realną datę dodania — najdokładniejsze źródło |
 | **nieruchomosci-online.pl** | nie | data liczona od pierwszego wykrycia przez scraper |
-| **Tarnowiak.pl** | tak | lokalny portal (region tarnowski) |
+| **Tarnowiak.pl** | tak | lokalny portal; miejscowość wyłuskiwana z tytułu (heurystyka) |
 
 ## Jak liczone są kategorie „nowe"
 

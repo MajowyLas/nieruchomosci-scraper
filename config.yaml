@@ -12,6 +12,7 @@ pokoje_min: 4
 pokoje_max: null
 portale:
 - olx
+- otodom
 - gratka
 - nieruchomosci-online
 - tarnowiak

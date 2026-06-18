@@ -42,7 +42,7 @@ from scraper import report as report_mod
 
 CONFIG_PATH = "config.yaml"
 DB_PATH = "data/nieruchomosci.db"
-PORTALE = ["olx", "gratka", "nieruchomosci-online", "tarnowiak"]
+PORTALE = ["olx", "otodom", "gratka", "nieruchomosci-online", "tarnowiak"]
 
 
 class Tooltip:
@@ -139,25 +139,26 @@ class App:
             self.v_portale[p] = var
             ttk.Checkbutton(par, text=p, variable=var).grid(row=5 + i, column=1, columnspan=3, sticky="w")
 
-        ttk.Label(par, text="Max stron:").grid(row=9, column=0, sticky="w", pady=1)
+        w = 5 + len(PORTALE)   # pierwszy wolny wiersz pod lista portali
+        ttk.Label(par, text="Max stron:").grid(row=w, column=0, sticky="w", pady=1)
         self.e_max_stron = ttk.Spinbox(par, from_=1, to=20, width=6)
         self.e_max_stron.set(3)
-        self.e_max_stron.grid(row=9, column=1, sticky="w")
+        self.e_max_stron.grid(row=w, column=1, sticky="w")
 
-        ttk.Label(par, text="Prog okazji [%]:").grid(row=10, column=0, sticky="w", pady=1)
+        ttk.Label(par, text="Prog okazji [%]:").grid(row=w + 1, column=0, sticky="w", pady=1)
         self.e_prog = ttk.Spinbox(par, from_=50, to=100, width=6)
         self.e_prog.set(85)
-        self.e_prog.grid(row=10, column=1, sticky="w")
+        self.e_prog.grid(row=w + 1, column=1, sticky="w")
 
-        ttk.Label(par, text="Licz km od:").grid(row=11, column=0, sticky="w", pady=1)
+        ttk.Label(par, text="Licz km od:").grid(row=w + 2, column=0, sticky="w", pady=1)
         self.e_lok_ref = ttk.Entry(par, width=22)
-        self.e_lok_ref.grid(row=11, column=1, columnspan=4, sticky="w", pady=1)
+        self.e_lok_ref.grid(row=w + 2, column=1, columnspan=4, sticky="w", pady=1)
 
-        ttk.Label(par, text="Max km:").grid(row=12, column=0, sticky="w", pady=1)
+        ttk.Label(par, text="Max km:").grid(row=w + 3, column=0, sticky="w", pady=1)
         self.e_max_km = ttk.Entry(par, width=6)
-        self.e_max_km.grid(row=12, column=1, sticky="w")
+        self.e_max_km.grid(row=w + 3, column=1, sticky="w")
         ttk.Label(par, text="(promien od 'Licz km od' / miasta)",
-                  foreground="#888").grid(row=12, column=2, columnspan=3, sticky="w")
+                  foreground="#888").grid(row=w + 3, column=2, columnspan=3, sticky="w")
 
         rap = ttk.LabelFrame(top, text="Raport", padding=8)
         rap.pack(side="left", fill="y")
@@ -296,6 +297,15 @@ class App:
                                    wraplength=380, justify="left")
         self.det_title.pack(anchor="w", fill="x")
 
+        # przyciski akcji NA GORZE panelu - zawsze widoczne (nie chowaja sie na dole)
+        akcje_of = ttk.Frame(prawy)
+        akcje_of.pack(fill="x", pady=4)
+        self.b_otworz = ttk.Button(akcje_of, text="Otworz w przegladarce",
+                                   command=self._otworz_oferte, state="disabled")
+        self.b_fav = ttk.Button(akcje_of, text="☆ Ulubione", command=self._toggle_fav, state="disabled")
+        self.b_otworz.pack(side="left", padx=(0, 4))
+        self.b_fav.pack(side="left")
+
         self.foto = ttk.Label(prawy)
         self.foto.pack(anchor="center", pady=6)
         nav = ttk.Frame(prawy)
@@ -310,12 +320,6 @@ class App:
         self.det_info.pack(fill="both", expand=True, pady=6)
         self.det_info.configure(state="disabled")
 
-        self.b_fav = ttk.Button(prawy, text="☆ Dodaj do ulubionych",
-                                 command=self._toggle_fav, state="disabled")
-        self.b_fav.pack(fill="x", pady=(0, 4))
-        self.b_otworz = ttk.Button(prawy, text="Otworz oferte w przegladarce",
-                                   command=self._otworz_oferte, state="disabled")
-        self.b_otworz.pack(fill="x")
         self._aktualny_url = None
         pan.add(prawy, weight=2)
 
@@ -545,7 +549,7 @@ class App:
         self._aktualny_url = r["url"]
         self.b_otworz.configure(state="normal")
         self.b_fav.configure(state="normal",
-                             text="★ Usun z ulubionych" if r.get("favorite") else "☆ Dodaj do ulubionych")
+                             text="★ Ulubiona" if r.get("favorite") else "☆ Do ulubionych")
         self.det_title.configure(text=r["title"] or "(bez tytulu)")
 
         linie = []
@@ -728,7 +732,7 @@ class App:
             db.set_favorite(r["site"], r["listing_id"], bool(nowy))
         finally:
             db.close()
-        self.b_fav.configure(text="★ Usun z ulubionych" if nowy else "☆ Dodaj do ulubionych")
+        self.b_fav.configure(text="★ Ulubiona" if nowy else "☆ Do ulubionych")
         # odswiez gwiazdke w wierszu (lub usun wiersz, gdy aktywny filtr 'tylko ulubione')
         if self.f_fav.get() and not nowy:
             self._odswiez_tabele()

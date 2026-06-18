@@ -17,7 +17,7 @@ class Config:
     powierzchnia_max: Optional[float] = None
     pokoje_min: Optional[int] = None
     pokoje_max: Optional[int] = None
-    portale: list[str] = field(default_factory=lambda: ["olx", "gratka", "nieruchomosci-online", "tarnowiak"])
+    portale: list[str] = field(default_factory=lambda: ["olx", "otodom", "gratka", "nieruchomosci-online", "tarnowiak"])
     max_stron: int = 3
     opoznienie: float = 1.0
     okazja_prog_procent: float = 85.0
