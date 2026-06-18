@@ -32,6 +32,45 @@ DB_PATH = "data/nieruchomosci.db"
 PORTALE = ["olx", "gratka", "nieruchomosci-online", "tarnowiak"]
 
 
+class Tooltip:
+    """Prosty dymek z podpowiedzia pokazywany po najechaniu na widget."""
+
+    def __init__(self, widget, text: str, delay: int = 450):
+        self.widget, self.text, self.delay = widget, text, delay
+        self.tip = None
+        self._after = None
+        widget.bind("<Enter>", self._schedule)
+        widget.bind("<Leave>", self._hide)
+        widget.bind("<ButtonPress>", self._hide)
+
+    def _schedule(self, _evt=None):
+        self._cancel()
+        self._after = self.widget.after(self.delay, self._show)
+
+    def _cancel(self):
+        if self._after:
+            self.widget.after_cancel(self._after)
+            self._after = None
+
+    def _show(self):
+        if self.tip:
+            return
+        x = self.widget.winfo_rootx() + 12
+        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 4
+        self.tip = tk.Toplevel(self.widget)
+        self.tip.wm_overrideredirect(True)
+        self.tip.wm_geometry(f"+{x}+{y}")
+        tk.Label(self.tip, text=self.text, justify="left", background="#ffffe0",
+                 relief="solid", borderwidth=1, font=("", 9), padx=6, pady=3,
+                 wraplength=340).pack()
+
+    def _hide(self, _evt=None):
+        self._cancel()
+        if self.tip:
+            self.tip.destroy()
+            self.tip = None
+
+
 class App:
     def __init__(self, root: tk.Tk):
         self.root = root
@@ -111,16 +150,35 @@ class App:
         self.v_sortuj_odl = tk.BooleanVar(value=False)
         ttk.Checkbutton(rap, text="sortuj wg odleglosci", variable=self.v_sortuj_odl).pack(anchor="w")
 
-        # --- przyciski ---
-        btns = ttk.Frame(self.root, padding=(8, 0))
-        btns.pack(side="top", fill="x")
-        self.b_zapisz = ttk.Button(btns, text="Zapisz parametry", command=self._zapisz_config)
-        self.b_scrape = ttk.Button(btns, text="Pobierz swieze dane", command=lambda: self._start_scrape(False))
-        self.b_raport = ttk.Button(btns, text="Pokaz raport", command=self._pokaz_raport)
-        self.b_detale = ttk.Button(btns, text="Szczegoly + zdjecia", command=self._start_details)
-        self.b_eksport = ttk.Button(btns, text="Eksport .md", command=self._eksport_md)
-        for b in (self.b_zapisz, self.b_scrape, self.b_raport, self.b_detale, self.b_eksport):
+        # --- przyciski akcji (z linijka kolejnosci i tooltipami) ---
+        akcje = ttk.Frame(self.root, padding=(8, 0))
+        akcje.pack(side="top", fill="x")
+        ttk.Label(
+            akcje,
+            text="Kolejnosc: 1) Pobierz oferty z portali  →  2) Pokaz oferty  "
+                 "→  3) (opcjonalnie) Dociagnij zdjecia.   Po najechaniu na przycisk pojawi sie podpowiedz.",
+            foreground="#666",
+        ).pack(anchor="w", pady=(4, 0))
+        btns = ttk.Frame(akcje)
+        btns.pack(fill="x", pady=(2, 4))
+        self.b_scrape = ttk.Button(btns, text="1. Pobierz oferty z portali",
+                                   command=lambda: self._start_scrape(False))
+        self.b_raport = ttk.Button(btns, text="2. Pokaz oferty", command=self._pokaz_raport)
+        self.b_detale = ttk.Button(btns, text="3. Dociagnij zdjecia i opisy", command=self._start_details)
+        ttk.Separator(btns, orient="vertical").pack(side="left", fill="y", padx=8, pady=2)
+        self.b_zapisz = ttk.Button(btns, text="Zapisz ustawienia", command=self._zapisz_config)
+        self.b_eksport = ttk.Button(btns, text="Eksport do pliku", command=self._eksport_md)
+        for b in (self.b_scrape, self.b_raport, self.b_detale, self.b_zapisz, self.b_eksport):
             b.pack(side="left", padx=4, pady=6)
+
+        Tooltip(self.b_scrape, "Pobiera AKTUALNE oferty z portali (przez internet) i zapisuje "
+                               "do lokalnej bazy. WOLNE - rob raz na jakis czas (np. raz dziennie).")
+        Tooltip(self.b_raport, "Buduje liste ofert z JUZ pobranych danych wg ustawionych filtrow. "
+                               "Szybkie - klikaj po kazdej zmianie parametrow.")
+        Tooltip(self.b_detale, "Wchodzi na podstrony ofert (tych po filtrach) i dociaga m2 dzialki, "
+                               "rok, opis i zdjecia. WOLNE - 1 zapytanie na oferte, wynik buforowany.")
+        Tooltip(self.b_zapisz, "Zapisuje biezace ustawienia formularza do pliku config.yaml.")
+        Tooltip(self.b_eksport, "Zapisuje liste ofert do pliku Markdown (.md).")
 
         # --- pasek postepu + status ---
         pasek = ttk.Frame(self.root, padding=(8, 0))
