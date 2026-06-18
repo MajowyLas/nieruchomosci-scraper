@@ -41,6 +41,7 @@ _NOWE_KOLUMNY = {
     "plot_area": "REAL", "floor": "TEXT", "year_built": "INTEGER",
     "description": "TEXT", "image_urls": "TEXT", "photos_dir": "TEXT",
     "detail_fetched": "INTEGER DEFAULT 0",
+    "favorite": "INTEGER DEFAULT 0",
 }
 
 

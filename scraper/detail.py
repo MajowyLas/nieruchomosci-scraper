@@ -85,19 +85,31 @@ def _opis(soup: BeautifulSoup) -> Optional[str]:
 
 def _zdjecia(soup: BeautifulSoup, html: str, site: str, base_url: str) -> list[str]:
     urls: list[str] = []
-    # glowne zdjecie zawsze z og:image
+
+    if site == "tarnowiak":
+        # WYLACZNIE galeria oferty (div.images / a.fancybox) - poza nia sa banery
+        # reklamowe (SKUP AUT itp.), ktorych NIE chcemy pobierac.
+        gal = soup.select_one("div.images")
+        if gal:
+            for a in gal.select("a.fancybox[href]"):
+                urls.append(urljoin(base_url, a["href"]))
+            if not urls:
+                for img in gal.select("img[src]"):
+                    if "/obrazki/" in img.get("src", ""):
+                        urls.append(urljoin(base_url, img["src"]))
+        return _oczysc_zdjecia(urls)
+
+    # pozostale portale: glowne zdjecie z og:image + wzorzec CDN
     og = soup.find("meta", property="og:image")
     if og and og.get("content"):
         urls.append(og["content"])
-
     pattern = _IMG_PATTERNS.get(site)
     if pattern:
         urls += re.findall(pattern, html)
-    elif site == "tarnowiak":
-        # Tarnowiak: zdjecia w sciezkach /obrazki/ (wzgledne), pomijamy banery
-        for src in re.findall(r'/obrazki/[^"\'\s)]+?\.(?:jpe?g|png)', html):
-            if "premium" not in src and "grafika" not in src:
-                urls.append(urljoin(base_url, src))
+    return _oczysc_zdjecia(urls)
+
+
+def _oczysc_zdjecia(urls: list[str]) -> list[str]:
 
     # odfiltruj smieci i duplikaty (po fragmencie identyfikujacym zdjecie)
     czyste, widziane = [], set()
