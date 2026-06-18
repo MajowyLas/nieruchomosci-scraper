@@ -93,7 +93,8 @@ python ui.py
 W oknie ustawiasz parametry (miasto, rodzaj, cena, metraż, pokoje, portale, promień km),
 po lewej widzisz **tabelę ofert**, a po kliknięciu wiersza — **panel szczegółów ze
 zdjęciem** (miniatura, przewijanie strzałkami ◀ ▶, przycisk „Otwórz w przeglądarce").
-U góry pasek postępu pokazuje, że coś się dzieje, a na dole jest log.
+U góry **pasek postępu** wypełnia się proporcjonalnie do wykonanej pracy (np. `7/20`
+pogłębionych ofert), a na dole jest log.
 
 Przyciski:
 

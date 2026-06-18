@@ -30,17 +30,21 @@ def _enable_windows_ansi() -> None:
         pass
 
 
-def run_scrape(cfg: Config, db: Database, log: Callable[[str], None] = print) -> None:
-    """Scrapuje portale i zapisuje do bazy. `log` pozwala przekierowac komunikaty
-    (CLI -> print, GUI -> okno)."""
+def run_scrape(cfg: Config, db: Database, log: Callable[[str], None] = print,
+               progress=None) -> None:
+    """Scrapuje portale i zapisuje do bazy. `log` przekierowuje komunikaty,
+    `progress(done, total)` raportuje postep (co portal)."""
     client = HttpClient(delay=cfg.opoznienie)
     log(f"Scrapuje portale: {', '.join(cfg.portale)}")
     log(f"Miasto: {cfg.miasto} | typy: {', '.join(cfg.typy)} | max stron: {cfg.max_stron}")
     suma_nowe, suma_znane = 0, 0
-    for nazwa in cfg.portale:
+    razem = len(cfg.portale)
+    for idx, nazwa in enumerate(cfg.portale, 1):
         klasa = SCRAPERS.get(nazwa)
         if not klasa:
             log(f"  [!] Nieznany portal '{nazwa}' - pomijam")
+            if progress:
+                progress(idx, razem)
             continue
         try:
             oferty = klasa(client, cfg).scrape()
@@ -50,6 +54,8 @@ def run_scrape(cfg: Config, db: Database, log: Callable[[str], None] = print) ->
             log(f"  {nazwa}: pobrano {len(oferty)} (nowe: {stat['nowe']}, znane: {stat['znane']})")
         except Exception as e:  # jeden portal nie moze polozyc calego scrapowania
             log(f"  {nazwa}: BLAD: {type(e).__name__}: {e}")
+        if progress:
+            progress(idx, razem)
     log(f"Razem: {suma_nowe} nowych, {suma_znane} znanych ofert zapisanych do bazy.")
 
 
@@ -66,16 +72,17 @@ def fetch_filtered(cfg: Config, db: Database) -> list[sqlite3.Row]:
 
 
 def fetch_details(cfg: Config, db: Database, rows, log: Callable[[str], None] = lambda m: None,
-                  pobieraj_zdjecia: bool = True) -> int:
+                  pobieraj_zdjecia: bool = True, progress=None) -> int:
     """Poglebia oferty (podstrona + zdjecia) - tylko te jeszcze niepobrane.
-    Zwraca liczbe poglebionych ofert."""
+    `progress(done, total)` raportuje postep. Zwraca liczbe poglebionych ofert."""
     do_pobrania = [r for r in rows if not r["detail_fetched"]]
     if not do_pobrania:
         log("Wszystkie oferty maja juz pobrane szczegoly.")
         return 0
     client = HttpClient(delay=cfg.opoznienie)
     foto = requests.Session()
-    log(f"Poglebianie {len(do_pobrania)} ofert (podstrona + zdjecia)...")
+    razem = len(do_pobrania)
+    log(f"Poglebianie {razem} ofert (podstrona + zdjecia)...")
     zrobione = 0
     for i, r in enumerate(do_pobrania, 1):
         resp = client.get(r["url"])
@@ -87,13 +94,16 @@ def fetch_details(cfg: Config, db: Database, rows, log: Callable[[str], None] = 
                 det["photos_dir"] = str(dest)
             db.update_detail(r["site"], r["listing_id"], det)
             zrobione += 1
-        if i % 5 == 0 or i == len(do_pobrania):
-            log(f"  ...{i}/{len(do_pobrania)}")
+        if progress:
+            progress(i, razem)
+        if i % 5 == 0 or i == razem:
+            log(f"  ...{i}/{razem}")
     log(f"Poglebiono {zrobione} ofert.")
     return zrobione
 
 
-def oblicz_odleglosci(cfg: Config, rows, log: Callable[[str], None] = lambda m: None) -> dict:
+def oblicz_odleglosci(cfg: Config, rows, log: Callable[[str], None] = lambda m: None,
+                      progress=None) -> dict:
     """Liczy odleglosc kazdej oferty od cfg.lokalizacja_odniesienia (w km).
     Pusty slownik, gdy lokalizacja nie podana lub nieznaleziona. Wspoldzielone
     przez CLI i GUI."""
@@ -108,7 +118,7 @@ def oblicz_odleglosci(cfg: Config, rows, log: Callable[[str], None] = lambda m: 
             log(f"Nie znaleziono lokalizacji odniesienia: {punkt}")
             return {}
         log(f"Punkt odniesienia: {punkt} -> {ref[0]:.4f}, {ref[1]:.4f}")
-        return policz_odleglosci(rows, ref, geo, log=log)
+        return policz_odleglosci(rows, ref, geo, log=log, progress=progress)
     finally:
         geo.close()
 

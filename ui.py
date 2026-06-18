@@ -125,8 +125,10 @@ class App:
         # --- pasek postepu + status ---
         pasek = ttk.Frame(self.root, padding=(8, 0))
         pasek.pack(side="top", fill="x")
-        self.progress = ttk.Progressbar(pasek, mode="indeterminate")
+        self.progress = ttk.Progressbar(pasek, mode="determinate", maximum=100)
         self.progress.pack(side="left", fill="x", expand=True)
+        self.progress_txt = ttk.Label(pasek, text="", width=10, anchor="e")
+        self.progress_txt.pack(side="left", padx=(6, 0))
         self.summary = ttk.Label(self.root, text="", padding=(8, 2), foreground="#555")
         self.summary.pack(side="top", fill="x")
 
@@ -285,7 +287,8 @@ class App:
         try:
             db = Database(DB_PATH)
             try:
-                run_scrape(cfg, db, log=lambda m: self._q.put(("log", m)))
+                run_scrape(cfg, db, log=lambda m: self._q.put(("log", m)),
+                           progress=lambda d, t: self._q.put(("progress", (d, t))))
             finally:
                 db.close()
             self._q.put(("done", "Scrapowanie zakonczone."))
@@ -306,7 +309,8 @@ class App:
             db = Database(DB_PATH)
             try:
                 rows = fetch_filtered(cfg, db)
-                fetch_details(cfg, db, rows, log=lambda m: self._q.put(("log", m)))
+                fetch_details(cfg, db, rows, log=lambda m: self._q.put(("log", m)),
+                              progress=lambda d, t: self._q.put(("progress", (d, t))))
             finally:
                 db.close()
             self._q.put(("done_refresh", cfg))
@@ -331,7 +335,8 @@ class App:
                 rows = [dict(r) for r in fetch_filtered(cfg, db)]
             finally:
                 db.close()
-            odl = oblicz_odleglosci(cfg, rows, log=lambda m: self._q.put(("log", m)))
+            odl = oblicz_odleglosci(cfg, rows, log=lambda m: self._q.put(("log", m)),
+                                    progress=lambda d, t: self._q.put(("progress", (d, t))))
             rows = report_mod.filtruj_po_km(rows, odl, cfg.max_km)
             rows, also_on = report_mod.deduplikuj(rows)
             liczby = report_mod.policz_kategorie(rows, date.today())
@@ -476,6 +481,8 @@ class App:
                 kind, payload = self._q.get_nowait()
                 if kind == "log":
                     self._log(str(payload))
+                elif kind == "progress":
+                    self._ustaw_postep(*payload)
                 elif kind == "offers":
                     self._populate_tree(*payload)
                     self._set_running(False)
@@ -500,9 +507,13 @@ class App:
         for b in (self.b_scrape, self.b_raport, self.b_detale, self.b_zapisz, self.b_eksport):
             b.configure(state="disabled" if running else "normal")
         if running:
-            self.progress.start(12)
-        else:
-            self.progress.stop()
+            self.progress.configure(value=0)
+            self.progress_txt.configure(text="")
+
+    def _ustaw_postep(self, done: int, total: int) -> None:
+        total = max(total, 1)
+        self.progress.configure(maximum=total, value=done)
+        self.progress_txt.configure(text=f"{done}/{total}")
 
     def _set_status(self, txt: str) -> None:
         self.status.configure(text=txt)
