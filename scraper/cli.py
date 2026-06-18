@@ -11,6 +11,7 @@ from .config import load_config, Config
 from .http import HttpClient
 from .storage import Database
 from .sites import SCRAPERS
+from .geo import Geocoder, policz_odleglosci
 from . import report as report_mod
 
 
@@ -61,22 +62,43 @@ def fetch_filtered(cfg: Config, db: Database) -> list[sqlite3.Row]:
     )
 
 
+def oblicz_odleglosci(cfg: Config, rows, log: Callable[[str], None] = lambda m: None) -> dict:
+    """Liczy odleglosc kazdej oferty od cfg.lokalizacja_odniesienia (w km).
+    Pusty slownik, gdy lokalizacja nie podana lub nieznaleziona. Wspoldzielone
+    przez CLI i GUI."""
+    if not cfg.lokalizacja_odniesienia:
+        return {}
+    geo = Geocoder()
+    try:
+        ref = geo.geocode(cfg.lokalizacja_odniesienia)
+        if not ref:
+            log(f"Nie znaleziono lokalizacji odniesienia: {cfg.lokalizacja_odniesienia}")
+            return {}
+        log(f"Punkt odniesienia: {cfg.lokalizacja_odniesienia} -> {ref[0]:.4f}, {ref[1]:.4f}")
+        return policz_odleglosci(rows, ref, geo, log=log)
+    finally:
+        geo.close()
+
+
 def run_report(cfg: Config, db: Database, kategoria: str, zapisz: str | None,
-               bez_kolorow: bool, tylko_okazje: bool) -> None:
+               bez_kolorow: bool, tylko_okazje: bool, sortuj_odleglosc: bool = False) -> None:
     rows = fetch_filtered(cfg, db)
     dzis = date.today()
     prog = cfg.okazja_prog_procent
+    odleglosci = oblicz_odleglosci(cfg, rows, log=print)
     if not bez_kolorow:
         _enable_windows_ansi()
     use_color = (not bez_kolorow) and sys.stdout.isatty()
     print(report_mod.render_terminal(rows, dzis, kategoria, use_color=use_color,
-                                     prog_okazji=prog, tylko_okazje=tylko_okazje))
+                                     prog_okazji=prog, tylko_okazje=tylko_okazje,
+                                     odleglosci=odleglosci, sortuj_po_odleglosci=sortuj_odleglosc))
     if zapisz:
         p = Path(zapisz)
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(
             report_mod.render_markdown(rows, dzis, kategoria, prog_okazji=prog,
-                                       tylko_okazje=tylko_okazje),
+                                       tylko_okazje=tylko_okazje, odleglosci=odleglosci,
+                                       sortuj_po_odleglosci=sortuj_odleglosc),
             encoding="utf-8",
         )
         print(f"\nRaport zapisany do: {p}")
@@ -106,6 +128,8 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("--bez-kolorow", action="store_true", help="wylacz kolory ANSI")
         sp.add_argument("--tylko-okazje", action="store_true",
                         help="pokaz wylacznie oferty oznaczone jako okazja")
+        sp.add_argument("--sortuj-odleglosc", action="store_true",
+                        help="sortuj wg odleglosci (wymaga lokalizacja_odniesienia w config)")
     return p
 
 
@@ -133,7 +157,8 @@ def main(argv: list[str] | None = None) -> int:
             zapisz = getattr(args, "zapisz", None)
             bez_kolorow = getattr(args, "bez_kolorow", False)
             tylko_okazje = getattr(args, "tylko_okazje", False)
-            run_report(cfg, db, kategoria, zapisz, bez_kolorow, tylko_okazje)
+            sortuj_odleglosc = getattr(args, "sortuj_odleglosc", False)
+            run_report(cfg, db, kategoria, zapisz, bez_kolorow, tylko_okazje, sortuj_odleglosc)
     finally:
         db.close()
     return 0

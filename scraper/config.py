@@ -21,6 +21,7 @@ class Config:
     max_stron: int = 3
     opoznienie: float = 1.5
     okazja_prog_procent: float = 85.0
+    lokalizacja_odniesienia: Optional[str] = None
 
 
 def load_config(path: str | Path = "config.yaml") -> Config:
@@ -47,6 +48,8 @@ def load_config(path: str | Path = "config.yaml") -> Config:
         max_stron=int(raw.get("max_stron", 3)),
         opoznienie=float(raw.get("opoznienie", 1.5)),
         okazja_prog_procent=float(raw.get("okazja_prog_procent", 85)),
+        lokalizacja_odniesienia=(str(raw["lokalizacja_odniesienia"]).strip()
+                                 if raw.get("lokalizacja_odniesienia") else None),
     )
 
     # walidacja

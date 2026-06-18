@@ -1,46 +1,20 @@
-# ============================================================
-#  Konfiguracja scrapera nieruchomosci
-#  Edytuj ten plik, aby zmienic parametry wyszukiwania.
-# ============================================================
-
-# Miasto / lokalizacja (slug uzywany w adresach URL portali).
-# Przyklady: tarnow, krakow, rzeszow, warszawa
+# Plik wygenerowany przez UI (ui.py). Mozna edytowac recznie.
 miasto: tarnow
-
-# Typy nieruchomosci do scrapowania: mieszkanie i/lub dom
 typy:
-  - mieszkanie
-  - dom
-
-# Rodzaj transakcji (na razie obslugiwana: sprzedaz)
+- mieszkanie
+- dom
 transakcja: sprzedaz
-
-# Filtry ceny (zostaw puste = bez limitu). Wartosci w zlotych.
-cena_min:
-cena_max:
-
-# Powierzchnia uzytkowa / metraz w m2 (zostaw puste = bez limitu).
-powierzchnia_min:
-powierzchnia_max:
-
-# Liczba pokoi (zostaw puste = bez limitu).
-pokoje_min:
-pokoje_max:
-
-# Portale do przeszukania. Zakomentuj (#) te, ktorych nie chcesz.
+cena_min: null
+cena_max: null
+powierzchnia_min: 100.0
+powierzchnia_max: null
+pokoje_min: 4
+pokoje_max: null
 portale:
-  - olx
-  - gratka
-  - nieruchomosci-online
-  - tarnowiak
-
-# Ile stron wynikow pobrac z kazdego portalu (1 strona ~ 30-50 ofert).
+- olx
+- gratka
+- nieruchomosci-online
+- tarnowiak
 max_stron: 3
-
-# Odstep miedzy zapytaniami w sekundach (uprzejmosc wobec serwerow).
 opoznienie: 1.5
-
-# Prog "okazji": oferta jest okazja, gdy jej cena za m2 jest ponizej tego
-# procentu mediany dla danego typu. 85 = co najmniej 15% taniej niz mediana.
-# Nizsza wartosc = surowsze kryterium (mniej, ale lepszych okazji).
-okazja_prog_procent: 85
+okazja_prog_procent: 85.0

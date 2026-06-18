@@ -160,7 +160,8 @@ def _szczegoly(row: sqlite3.Row) -> str:
 
 def render_terminal(rows: list[sqlite3.Row], dzis: date, kategoria: str,
                     use_color: bool = True, prog_okazji: float = 85.0,
-                    tylko_okazje: bool = False) -> str:
+                    tylko_okazje: bool = False, odleglosci: dict | None = None,
+                    sortuj_po_odleglosci: bool = False) -> str:
     c = _C(use_color)
     linie: list[str] = []
     liczby = policz_kategorie(rows, dzis)
@@ -182,7 +183,10 @@ def render_terminal(rows: list[sqlite3.Row], dzis: date, kategoria: str,
     wybrane = [r for r in rows if naleznik_do_okna(_data_pierwszego(r), dzis, kategoria)]
     if tylko_okazje:
         wybrane = [r for r in wybrane if czy_okazja(r, mediany, prog_okazji)]
-    wybrane.sort(key=lambda r: (r["first_seen"], -(r["price"] or 0)), reverse=True)
+    if sortuj_po_odleglosci and odleglosci:
+        wybrane.sort(key=lambda r: odleglosci.get((r["site"], r["listing_id"]), float("inf")))
+    else:
+        wybrane.sort(key=lambda r: (r["first_seen"], -(r["price"] or 0)), reverse=True)
 
     tytul_sekcji = NAZWY[kategoria].upper() + (" - OKAZJE" if tylko_okazje else "")
     linie.append(f"  {c.B}{tytul_sekcji} ({len(wybrane)} ofert){c.R}")
@@ -203,7 +207,11 @@ def render_terminal(rows: list[sqlite3.Row], dzis: date, kategoria: str,
             rabat = rabat_od_mediany(row, mediany)
             meta += f"  {c.YELLOW}{c.B}(-{rabat}% od mediany){c.R}"
         linie.append(meta)
-        linie.append(f"       {c.DIM}{row['location']}  -  {row['site']}  -  {c.YELLOW}{wiek}{c.R}")
+        loc_line = f"       {c.DIM}{row['location']}  -  {row['site']}  -  {c.YELLOW}{wiek}{c.R}"
+        km = odleglosci.get((row["site"], row["listing_id"])) if odleglosci else None
+        if km is not None:
+            loc_line += f"  {c.CYAN}~{km:.1f} km{c.R}"
+        linie.append(loc_line)
         linie.append(f"       {c.DIM}{row['url']}{c.R}")
         linie.append("")
 
@@ -211,7 +219,9 @@ def render_terminal(rows: list[sqlite3.Row], dzis: date, kategoria: str,
 
 
 def render_markdown(rows: list[sqlite3.Row], dzis: date, kategoria: str,
-                    prog_okazji: float = 85.0, tylko_okazje: bool = False) -> str:
+                    prog_okazji: float = 85.0, tylko_okazje: bool = False,
+                    odleglosci: dict | None = None,
+                    sortuj_po_odleglosci: bool = False) -> str:
     liczby = policz_kategorie(rows, dzis)
     mediany = mediany_cen_m2(rows)
     out = [f"# Raport nieruchomosci - {dzis.isoformat()}", ""]
@@ -224,12 +234,15 @@ def render_markdown(rows: list[sqlite3.Row], dzis: date, kategoria: str,
     wybrane = [r for r in rows if naleznik_do_okna(_data_pierwszego(r), dzis, kategoria)]
     if tylko_okazje:
         wybrane = [r for r in wybrane if czy_okazja(r, mediany, prog_okazji)]
-    wybrane.sort(key=lambda r: (r["first_seen"], -(r["price"] or 0)), reverse=True)
+    if sortuj_po_odleglosci and odleglosci:
+        wybrane.sort(key=lambda r: odleglosci.get((r["site"], r["listing_id"]), float("inf")))
+    else:
+        wybrane.sort(key=lambda r: (r["first_seen"], -(r["price"] or 0)), reverse=True)
     tytul = NAZWY[kategoria] + (" - okazje" if tylko_okazje else "")
     out.append(f"## {tytul} ({len(wybrane)})")
     out.append("")
-    out.append("| # | Okazja | Tytul | Cena | Szczegoly | Lokalizacja | Portal | Dodano | Link |")
-    out.append("|---|:---:|-------|------|-----------|-------------|--------|--------|------|")
+    out.append("| # | Okazja | Tytul | Cena | Szczegoly | Lokalizacja | Odleglosc | Portal | Dodano | Link |")
+    out.append("|---|:---:|-------|------|-----------|-------------|-----------|--------|--------|------|")
     for i, row in enumerate(wybrane, 1):
         wiek = etykieta_wieku(_data_pierwszego(row), dzis)
         if czy_okazja(row, mediany, prog_okazji):
@@ -237,8 +250,10 @@ def render_markdown(rows: list[sqlite3.Row], dzis: date, kategoria: str,
             ozn = f"-{rabat}%"
         else:
             ozn = ""
+        km = odleglosci.get((row["site"], row["listing_id"])) if odleglosci else None
+        km_txt = f"~{km:.1f} km" if km is not None else ""
         out.append(
             f"| {i} | {ozn} | {row['title']} | {_cena(row['price'])} | {_szczegoly(row)} | "
-            f"{row['location']} | {row['site']} | {wiek} | {row['url']} |"
+            f"{row['location']} | {km_txt} | {row['site']} | {wiek} | {row['url']} |"
         )
     return "\n".join(out)

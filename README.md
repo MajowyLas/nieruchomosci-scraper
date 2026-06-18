@@ -61,6 +61,7 @@ portale:                  # zakomentuj (#) te, których nie chcesz
 max_stron: 3              # ile stron wyników pobrać z każdego portalu
 opoznienie: 1.5           # sekundy między zapytaniami (uprzejmość wobec serwerów)
 okazja_prog_procent: 85   # próg okazji: cena/m² < 85% mediany (≥15% taniej)
+lokalizacja_odniesienia:  # adres/miasto do liczenia km (puste = nie licz odległości)
 ```
 
 ### Parametry wyszukiwania
@@ -71,6 +72,7 @@ okazja_prog_procent: 85   # próg okazji: cena/m² < 85% mediany (≥15% taniej)
 | `cena_min` / `cena_max` | widełki ceny w zł |
 | `powierzchnia_min` / `powierzchnia_max` | metraż użytkowy w m² |
 | `pokoje_min` / `pokoje_max` | liczba pokoi |
+| `lokalizacja_odniesienia` | adres/miasto, od którego liczona jest odległość ofert (w km) |
 
 Filtry metrażu, pokoi i ceny są stosowane **na etapie raportu** — możesz je zmienić
 w `config.yaml` i od razu uruchomić raport ponownie, **bez ponownego scrapowania**
@@ -95,8 +97,11 @@ a przyciski robią resztę:
 - **Pokaż raport** — wyświetla raport z bazy (bez pobierania z sieci)
 - **Zapisz raport (.md)** — eksport raportu do pliku Markdown
 
-Okazje są podświetlone na pomarańczowo. Aby uruchomić okno bez okienka konsoli w tle,
-użyj `pythonw ui.py` (możesz zrobić do tego skrót na pulpicie).
+Okazje są podświetlone na pomarańczowo, a **linki do ofert są klikalne** (otwierają
+się w przeglądarce). Pole **„Licz km od"** pozwala podać adres/miasto odniesienia —
+wtedy przy każdej ofercie pojawia się odległość `~X km`, a checkbox „sortuj wg
+odległości" układa wyniki od najbliższych. Aby uruchomić okno bez okienka konsoli
+w tle, użyj `pythonw ui.py` (możesz zrobić do tego skrót na pulpicie).
 
 ## Użycie z terminala
 
@@ -123,6 +128,7 @@ Opcje raportu:
 | `--zapisz PLIK` | zapisz raport do pliku Markdown (np. `--zapisz raporty/dzis.md`) |
 | `--bez-kolorow` | wyłącz kolory ANSI (przydatne przy zapisie do pliku/logu) |
 | `--tylko-okazje` | pokaż wyłącznie oferty oznaczone jako okazja cenowa |
+| `--sortuj-odleglosc` | sortuj wg odległości (wymaga `lokalizacja_odniesienia` w config) |
 
 Opcje globalne: `--config ŚCIEŻKA` (inny plik konfiguracji), `--db ŚCIEŻKA` (inna baza).
 
@@ -148,6 +154,23 @@ Aby zobaczyć wyłącznie okazje:
 ```powershell
 python main.py raport --kategoria 7dni --tylko-okazje
 ```
+
+## Odległość od wybranej lokalizacji
+
+Po ustawieniu `lokalizacja_odniesienia` (w `config.yaml` lub w polu „Licz km od"
+w oknie) raport pokazuje przy każdej ofercie przybliżoną odległość `~X km` od tego
+punktu, a opcja „sortuj wg odległości" / `--sortuj-odleglosc` układa oferty od
+najbliższych.
+
+Współrzędne są ustalane przez geokodowanie (OpenStreetMap **Nominatim**, darmowe,
+bez klucza). Kilka uwag:
+
+- Wyniki są **buforowane** w `data/geocache.db`, więc to samo miejsce nie jest
+  pytane dwa razy — pierwszy raport z odległościami trwa dłużej, kolejne są szybkie.
+- Lokalizacje ofert bywają zgrubne (dzielnica/miasto), więc odległość jest
+  **przybliżona** — najlepiej sprawdza się do odróżnienia ofert „w mieście" od tych
+  w okolicznych miejscowościach.
+- Wymaga połączenia z internetem (tak jak samo scrapowanie).
 
 ## Automatyczne uruchamianie raz dziennie (Windows)
 
@@ -175,6 +198,7 @@ scraper/
 ├── models.py       # model Listing (jednolite ogłoszenie)
 ├── parsing.py      # parsowanie ceny, powierzchni, dat (po polsku)
 ├── storage.py      # baza SQLite + logika first_seen
+├── geo.py          # geokodowanie (Nominatim) + odległość (haversine)
 ├── report.py       # kategoryzacja po dacie + wydruk/eksport
 └── sites/          # adaptery portali (jeden plik = jeden portal)
     ├── base.py

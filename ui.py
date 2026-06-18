@@ -7,6 +7,7 @@ Calosc opiera sie na tej samej logice co CLI (scraper.cli / scraper.report).
 from __future__ import annotations
 import queue
 import threading
+import webbrowser
 from datetime import date
 from pathlib import Path
 
@@ -17,7 +18,7 @@ import yaml
 
 from scraper.config import Config, load_config
 from scraper.storage import Database
-from scraper.cli import run_scrape, fetch_filtered
+from scraper.cli import run_scrape, fetch_filtered, oblicz_odleglosci
 from scraper import report as report_mod
 
 CONFIG_PATH = "config.yaml"
@@ -77,6 +78,12 @@ class App:
         self.e_prog.set(85)
         self.e_prog.grid(row=10, column=1, sticky="w")
 
+        ttk.Label(par, text="Licz km od:").grid(row=11, column=0, sticky="w", pady=2)
+        self.e_lok_ref = ttk.Entry(par, width=22)
+        self.e_lok_ref.grid(row=11, column=1, columnspan=4, sticky="w", pady=2)
+        ttk.Label(par, text="(adres/miasto odniesienia, np. 'Tarnow, Krakowska 1')",
+                  foreground="#888").grid(row=12, column=0, columnspan=5, sticky="w")
+
         # --- Raport ---
         rap = ttk.LabelFrame(top, text="Raport", padding=10)
         rap.pack(side="left", fill="y")
@@ -88,6 +95,8 @@ class App:
                             variable=self.v_kategoria).pack(anchor="w")
         self.v_tylko_okazje = tk.BooleanVar(value=False)
         ttk.Checkbutton(rap, text="tylko okazje", variable=self.v_tylko_okazje).pack(anchor="w", pady=(6, 0))
+        self.v_sortuj_odl = tk.BooleanVar(value=False)
+        ttk.Checkbutton(rap, text="sortuj wg odleglosci", variable=self.v_sortuj_odl).pack(anchor="w")
 
         # --- Przyciski ---
         btns = ttk.Frame(self.root, padding=(10, 0))
@@ -146,6 +155,8 @@ class App:
             var.set(p in cfg.portale)
         self.e_max_stron.set(cfg.max_stron)
         self.e_prog.set(int(cfg.okazja_prog_procent))
+        if cfg.lokalizacja_odniesienia:
+            self.e_lok_ref.insert(0, cfg.lokalizacja_odniesienia)
 
     def _build_config(self) -> Config | None:
         typy = []
@@ -174,6 +185,7 @@ class App:
             portale=portale,
             max_stron=self._opt_int(self.e_max_stron) or 3,
             okazja_prog_procent=self._opt_float(self.e_prog) or 85.0,
+            lokalizacja_odniesienia=self.e_lok_ref.get().strip() or None,
         )
 
     def _zapisz_config(self) -> None:
@@ -187,6 +199,7 @@ class App:
             "pokoje_min": cfg.pokoje_min, "pokoje_max": cfg.pokoje_max,
             "portale": cfg.portale, "max_stron": cfg.max_stron,
             "opoznienie": cfg.opoznienie, "okazja_prog_procent": cfg.okazja_prog_procent,
+            "lokalizacja_odniesienia": cfg.lokalizacja_odniesienia,
         }
         naglowek = "# Plik wygenerowany przez UI (ui.py). Mozna edytowac recznie.\n"
         Path(CONFIG_PATH).write_text(
@@ -229,6 +242,12 @@ class App:
                     self._set_status("Scrapowanie zakonczone.")
                     if self._then_report:
                         self._pokaz_raport(cfg=payload)
+                elif kind == "report_text":
+                    self._set_output(payload)
+                    self._linkuj()
+                    self._podswietl_okazje()
+                    self._set_running(False)
+                    self._set_status("Raport gotowy.")
                 elif kind == "error":
                     self._append("BLAD: " + str(payload) + "\n")
                     self._set_running(False)
@@ -242,22 +261,56 @@ class App:
         cfg = cfg or self._build_config()
         if not cfg:
             return
+        # czytamy zmienne Tk TU (glowny watek) i przekazujemy do workera
+        kat = self.v_kategoria.get()
+        tylko = self.v_tylko_okazje.get()
+        sortuj = self.v_sortuj_odl.get()
+        if cfg.lokalizacja_odniesienia:
+            # geokodowanie = operacja sieciowa -> watek, by okno nie zamarlo
+            self._set_running(True)
+            self._set_status("Liczenie odleglosci (geokodowanie)...")
+            self._append("\n=== Liczenie odleglosci (moze potrwac przy pierwszym razie) ===\n")
+            threading.Thread(target=self._raport_worker, args=(cfg, kat, tylko, sortuj),
+                             daemon=True).start()
+            return
+        try:
+            tekst = self._zbuduj_raport(cfg, {}, kat, tylko, sortuj)
+        except Exception as e:
+            messagebox.showerror("Blad", f"Nie udalo sie odczytac bazy: {e}")
+            return
+        self._set_output(tekst)
+        self._linkuj()
+        self._podswietl_okazje()
+        self._set_status("Raport gotowy.")
+
+    def _zbuduj_raport(self, cfg, odleglosci, kat, tylko, sortuj) -> str:
+        db = Database(DB_PATH)
+        try:
+            rows = fetch_filtered(cfg, db)
+        finally:
+            db.close()
+        return report_mod.render_terminal(
+            rows, date.today(), kat, use_color=False,
+            prog_okazji=cfg.okazja_prog_procent, tylko_okazje=tylko,
+            odleglosci=odleglosci, sortuj_po_odleglosci=sortuj,
+        )
+
+    def _raport_worker(self, cfg, kat, tylko, sortuj) -> None:
         try:
             db = Database(DB_PATH)
             try:
                 rows = fetch_filtered(cfg, db)
             finally:
                 db.close()
+            odl = oblicz_odleglosci(cfg, rows, log=lambda m: self._q.put(("log", m)))
+            tekst = report_mod.render_terminal(
+                rows, date.today(), kat, use_color=False,
+                prog_okazji=cfg.okazja_prog_procent, tylko_okazje=tylko,
+                odleglosci=odl, sortuj_po_odleglosci=sortuj,
+            )
+            self._q.put(("report_text", tekst))
         except Exception as e:
-            messagebox.showerror("Blad", f"Nie udalo sie odczytac bazy: {e}")
-            return
-        tekst = report_mod.render_terminal(
-            rows, date.today(), self.v_kategoria.get(), use_color=False,
-            prog_okazji=cfg.okazja_prog_procent, tylko_okazje=self.v_tylko_okazje.get(),
-        )
-        self._set_output(tekst)
-        self._podswietl_okazje()
-        self._set_status(f"Raport: {len(rows)} ofert po filtrach.")
+            self._q.put(("error", f"{type(e).__name__}: {e}"))
 
     def _eksport_md(self) -> None:
         cfg = self._build_config()
@@ -274,9 +327,11 @@ class App:
             rows = fetch_filtered(cfg, db)
         finally:
             db.close()
+        odl = oblicz_odleglosci(cfg, rows)  # korzysta z bufora, jesli juz liczone
         md = report_mod.render_markdown(
             rows, date.today(), self.v_kategoria.get(),
             prog_okazji=cfg.okazja_prog_procent, tylko_okazje=self.v_tylko_okazje.get(),
+            odleglosci=odl, sortuj_po_odleglosci=self.v_sortuj_odl.get(),
         )
         Path(sciezka).write_text(md, encoding="utf-8")
         self._set_status(f"Raport zapisany: {sciezka}")
@@ -291,6 +346,26 @@ class App:
             koniec = f"{pos}+8c"
             self.txt.tag_add("okazja", pos, koniec)
             start = koniec
+
+    def _linkuj(self) -> None:
+        """Zamienia adresy URL w raporcie na klikalne linki (otwiera przegladarke)."""
+        self.txt.tag_configure("link", foreground="#4ea1ff", underline=True)
+        start = "1.0"
+        i = 0
+        while True:
+            pos = self.txt.search("http", start, stopindex="end")
+            if not pos:
+                break
+            koniec = self.txt.index(f"{pos} lineend")
+            url = self.txt.get(pos, koniec).strip()
+            tag = f"link-{i}"
+            self.txt.tag_add("link", pos, koniec)
+            self.txt.tag_add(tag, pos, koniec)
+            self.txt.tag_bind(tag, "<Button-1>", lambda e, u=url: webbrowser.open(u))
+            self.txt.tag_bind(tag, "<Enter>", lambda e: self.txt.config(cursor="hand2"))
+            self.txt.tag_bind(tag, "<Leave>", lambda e: self.txt.config(cursor=""))
+            start = koniec
+            i += 1
 
     def _set_running(self, running: bool) -> None:
         stan = "disabled" if running else "normal"
