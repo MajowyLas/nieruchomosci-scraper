@@ -35,10 +35,9 @@ def _enable_windows_ansi() -> None:
 
 
 def run_scrape(cfg: Config, db: Database, log: Callable[[str], None] = print,
-               progress=None) -> None:
+               progress=None, stop=None) -> None:
     """Scrapuje portale RÓWNOLEGLE (kazdy na osobnym watku) i zapisuje do bazy.
-    Rozne portale = rozne serwery, wiec rownoleglosc jest bezpieczna; wewnatrz
-    portalu zostaje grzeczna pauza. Zapis do bazy robimy w jednym watku."""
+    `stop()` (callable -> bool) pozwala przerwac miedzy zadaniami."""
     log(f"Scrapuje rownolegle: {', '.join(cfg.portale)} (typy: {', '.join(cfg.typy)})")
     log(f"Miasto: {cfg.miasto} | max stron: {cfg.max_stron}")
     # zadania na poziomie (portal, typ) - mieszkania i domy z tego samego portalu ida naraz
@@ -46,6 +45,8 @@ def run_scrape(cfg: Config, db: Database, log: Callable[[str], None] = print,
     razem = len(zadania)
 
     def scrape_zadanie(nazwa, ptype):
+        if stop and stop():
+            return nazwa, [], None
         try:
             client = HttpClient(delay=cfg.opoznienie)  # osobny klient = osobna pauza
             return nazwa, SCRAPERS[nazwa](client, cfg).scrape_one_type(ptype), None
@@ -56,6 +57,10 @@ def run_scrape(cfg: Config, db: Database, log: Callable[[str], None] = print,
     with ThreadPoolExecutor(max_workers=min(razem, 8)) as ex:
         futs = [ex.submit(scrape_zadanie, n, t) for n, t in zadania]
         for fut in as_completed(futs):
+            if stop and stop():
+                ex.shutdown(wait=False, cancel_futures=True)
+                log("Przerwano scrapowanie.")
+                break
             nazwa, oferty, err = fut.result()
             if err:
                 log(f"  {nazwa}: BLAD: {err}")
@@ -83,7 +88,7 @@ def fetch_filtered(cfg: Config, db: Database) -> list[sqlite3.Row]:
 
 
 def fetch_details(cfg: Config, db: Database, rows, log: Callable[[str], None] = lambda m: None,
-                  pobieraj_zdjecia: bool = True, progress=None) -> int:
+                  pobieraj_zdjecia: bool = True, progress=None, stop=None) -> int:
     """Poglebia oferty (podstrona + zdjecia) - tylko te jeszcze niepobrane.
     `progress(done, total)` raportuje postep. Zwraca liczbe poglebionych ofert."""
     do_pobrania = [r for r in rows if not r["detail_fetched"]]
@@ -96,6 +101,8 @@ def fetch_details(cfg: Config, db: Database, rows, log: Callable[[str], None] = 
     sesja.headers.update(_DEFAULT_HEADERS)
 
     def zadanie(r):
+        if stop and stop():
+            return r, None
         try:
             resp = sesja.get(r["url"], timeout=25)
             if resp.status_code != 200:
@@ -113,6 +120,10 @@ def fetch_details(cfg: Config, db: Database, rows, log: Callable[[str], None] = 
     with ThreadPoolExecutor(max_workers=DETAL_WATKI) as ex:
         futs = [ex.submit(zadanie, r) for r in do_pobrania]
         for fut in as_completed(futs):
+            if stop and stop():
+                ex.shutdown(wait=False, cancel_futures=True)
+                log("Przerwano poglebianie.")
+                break
             r, det = fut.result()
             if det is not None:
                 db.update_detail(r["site"], r["listing_id"], det)  # zapis w 1 watku
@@ -127,7 +138,7 @@ def fetch_details(cfg: Config, db: Database, rows, log: Callable[[str], None] = 
 
 
 def oblicz_odleglosci(cfg: Config, rows, log: Callable[[str], None] = lambda m: None,
-                      progress=None) -> dict:
+                      progress=None, stop=None) -> dict:
     """Liczy odleglosc kazdej oferty od cfg.lokalizacja_odniesienia (w km).
     Pusty slownik, gdy lokalizacja nie podana lub nieznaleziona. Wspoldzielone
     przez CLI i GUI."""
@@ -142,7 +153,7 @@ def oblicz_odleglosci(cfg: Config, rows, log: Callable[[str], None] = lambda m: 
             log(f"Nie znaleziono lokalizacji odniesienia: {punkt}")
             return {}
         log(f"Punkt odniesienia: {punkt} -> {ref[0]:.4f}, {ref[1]:.4f}")
-        return policz_odleglosci(rows, ref, geo, log=log, progress=progress)
+        return policz_odleglosci(rows, ref, geo, log=log, progress=progress, stop=stop)
     finally:
         geo.close()
 

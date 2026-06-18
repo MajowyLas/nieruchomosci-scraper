@@ -213,6 +213,35 @@ def wybierz_oferty(rows, dzis: date, kategoria: str, tylko_okazje: bool = False,
     return wybrane, mediany
 
 
+def _tekst_oferty(r) -> str:
+    return f"{r['title'] or ''} {(_kol(r, 'description') or '')}".lower()
+
+
+def wykryj_rynek(r) -> Optional[str]:
+    """Heurystyka: rynek pierwotny vs wtorny ze slow w tytule/opisie."""
+    t = _tekst_oferty(r)
+    if any(k in t for k in ("pierwotny", "nowa inwestycja", "nowe mieszkanie", "od dewelopera",
+                            "deweloper", "nowo wybudowan")):
+        return "pierwotny"
+    if "wtorny" in t or "wtórny" in t or "z drugiej reki" in t:
+        return "wtorny"
+    return None
+
+
+def wykryj_stan(r) -> Optional[str]:
+    """Heurystyka: stan wykonczenia ze slow w tytule/opisie."""
+    t = _tekst_oferty(r)
+    if any(k in t for k in ("do remontu", "do odswiezenia", "do odświeżenia", "do wykonczenia",
+                            "do wykończenia", "wymaga remontu")):
+        return "do remontu"
+    if any(k in t for k in ("deweloperski", "deweloperskim", "stan surowy")):
+        return "deweloperski"
+    if any(k in t for k in ("do wejscia", "do wejścia", "pod klucz", "gotowe do zamieszkania",
+                            "wykonczone", "wykończone", "po remoncie", "po generalnym remoncie")):
+        return "do wejscia"
+    return None
+
+
 def tylko_w_oknie(rows, dzis: date, kategoria: str) -> list:
     """Zwraca tylko oferty z danego okna czasowego (dzis/3dni/7dni/wszystkie).
     Uzywane, by geokodowac WYLACZNIE wyswietlane oferty - oszczedza zapytania."""

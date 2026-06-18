@@ -82,8 +82,12 @@ class App:
         self.root.geometry("1180x820")
         self._q: queue.Queue = queue.Queue()
         self._gen = 0                            # token zapytania (anty-wyscig)
+        self._abort = threading.Event()          # flaga przerwania operacji
         self._fetching_detale: set[str] = set()  # iid ofert aktualnie doszczegolawianych
-        self._oferty: dict[str, dict] = {}      # iid -> wiersz (dict)
+        self._oferty: dict[str, dict] = {}      # iid (widoczne) -> wiersz (dict)
+        self._wszystkie: list[dict] = []         # pelna lista przed filtrami wynikow
+        self._mediany: dict = {}
+        self._liczby: dict = {}
         self._also_on: dict = {}
         self._odl: dict = {}
         self._foto_lista: list[str] = []
@@ -172,6 +176,8 @@ class App:
         self.b_eksport = ttk.Button(btns, text="Eksport", command=self._eksport_md)
         for b in (self.b_detale, self.b_zapisz, self.b_eksport):
             b.pack(side="left", padx=3, pady=4)
+        self.b_anuluj = ttk.Button(btns, text="Anuluj", command=self._anuluj, state="disabled")
+        self.b_anuluj.pack(side="right", padx=3, pady=4)
         ttk.Label(
             akcje,
             text="Ustaw filtry po lewej, potem: Pobierz dane (z internetu, rzadko) → Pokaz oferty "
@@ -198,6 +204,26 @@ class App:
         self.summary = ttk.Label(self.root, text="", padding=(8, 2), foreground="#555")
         self.summary.pack(side="top", fill="x")
 
+        # --- filtry wynikow (dzialaja natychmiast, bez ponownego pobierania) ---
+        flt = ttk.Frame(self.root, padding=(8, 0))
+        flt.pack(side="top", fill="x")
+        ttk.Label(flt, text="Filtruj wyniki:").pack(side="left")
+        self.f_typ = tk.StringVar(value="wszystkie")
+        self.f_rynek = tk.StringVar(value="wszystkie")
+        self.f_stan = tk.StringVar(value="wszystkie")
+        self.f_fav = tk.BooleanVar(value=False)
+        for etykieta, var, wartosci in (
+            ("Typ", self.f_typ, ["wszystkie", "mieszkanie", "dom"]),
+            ("Rynek", self.f_rynek, ["wszystkie", "pierwotny", "wtorny"]),
+            ("Stan", self.f_stan, ["wszystkie", "do wejscia", "deweloperski", "do remontu"]),
+        ):
+            ttk.Label(flt, text=etykieta + ":").pack(side="left", padx=(10, 2))
+            cb = ttk.Combobox(flt, textvariable=var, values=wartosci, state="readonly", width=12)
+            cb.pack(side="left")
+            cb.bind("<<ComboboxSelected>>", lambda e: self._odswiez_tabele())
+        ttk.Checkbutton(flt, text="tylko ulubione ★", variable=self.f_fav,
+                        command=self._odswiez_tabele).pack(side="left", padx=(12, 0))
+
         # --- glowny obszar: tabela ofert + panel szczegolow ---
         pan = ttk.PanedWindow(self.root, orient="horizontal")
         pan.pack(side="top", fill="both", expand=True, padx=8, pady=4)
@@ -219,6 +245,7 @@ class App:
         ysb.pack(side="right", fill="y")
         self.tree.pack(side="left", fill="both", expand=True)
         self.tree.bind("<<TreeviewSelect>>", self._on_select)
+        self.tree.bind("<Double-1>", lambda e: self._otworz_oferte())  # 2x klik = otworz oferte
         pan.add(lewy, weight=3)
 
         self._build_panel_szczegolow(pan)
@@ -255,6 +282,9 @@ class App:
         self.det_info.pack(fill="both", expand=True, pady=6)
         self.det_info.configure(state="disabled")
 
+        self.b_fav = ttk.Button(prawy, text="☆ Dodaj do ulubionych",
+                                 command=self._toggle_fav, state="disabled")
+        self.b_fav.pack(fill="x", pady=(0, 4))
         self.b_otworz = ttk.Button(prawy, text="Otworz oferte w przegladarce",
                                    command=self._otworz_oferte, state="disabled")
         self.b_otworz.pack(fill="x")
@@ -354,7 +384,8 @@ class App:
             db = Database(DB_PATH)
             try:
                 run_scrape(cfg, db, log=lambda m: self._q.put(("log", m)),
-                           progress=lambda d, t: self._q.put(("progress", (d, t))))
+                           progress=lambda d, t: self._q.put(("progress", (d, t))),
+                           stop=self._abort.is_set)
             finally:
                 db.close()
             self._q.put(("done_refresh", cfg))   # po pobraniu od razu pokaz liste
@@ -376,7 +407,8 @@ class App:
             try:
                 rows = fetch_filtered(cfg, db)
                 fetch_details(cfg, db, rows, log=lambda m: self._q.put(("log", m)),
-                              progress=lambda d, t: self._q.put(("progress", (d, t))))
+                              progress=lambda d, t: self._q.put(("progress", (d, t))),
+                              stop=self._abort.is_set)
             finally:
                 db.close()
             self._q.put(("done_refresh", cfg))
@@ -408,31 +440,53 @@ class App:
             r0, also0 = report_mod.deduplikuj(rows)
             wyb0, med0 = report_mod.wybierz_oferty(r0, dzis, kat, tylko, cfg.okazja_prog_procent, {}, False)
             self._q.put(("offers", (gen, wyb0, also0, {}, med0, liczby)))
-            self._q.put(("enable", None))    # lista widoczna, przyciski znow aktywne
+            self._q.put(("enable", gen))     # lista widoczna, glowne przyciski aktywne
             # 2) jesli trzeba - policz odleglosci w TLE i odswiez liste
             if cfg.lokalizacja_odniesienia or cfg.max_km:
                 self._q.put(("log", "Licze odleglosci w tle (lista juz widoczna)..."))
                 okno = report_mod.tylko_w_oknie(rows, dzis, kat)
                 odl = oblicz_odleglosci(cfg, okno, log=lambda m: self._q.put(("log", m)),
-                                        progress=lambda d, t: self._q.put(("progress", (d, t))))
+                                        progress=lambda d, t: self._q.put(("progress", (d, t))),
+                                        stop=self._abort.is_set)
                 r2 = report_mod.filtruj_po_km(rows, odl, cfg.max_km)
                 r2, also2 = report_mod.deduplikuj(r2)
                 wyb2, med2 = report_mod.wybierz_oferty(r2, dzis, kat, tylko, cfg.okazja_prog_procent,
                                                        odl, sortuj)
                 self._q.put(("offers", (gen, wyb2, also2, odl, med2, liczby)))
+            self._q.put(("fin", gen))
         except Exception as e:
             self._q.put(("error", f"{type(e).__name__}: {e}"))
 
     def _populate_tree(self, wybrane, also_on, odl, mediany, liczby) -> None:
+        """Zapamietuje pelny wynik i rysuje tabele (z filtrami wynikow)."""
+        self._wszystkie = wybrane
+        self._also_on, self._odl, self._mediany, self._liczby = also_on, odl, mediany, liczby
+        self._odswiez_tabele()
+
+    def _filtr_wynikow(self, r) -> bool:
+        """Czy oferta przechodzi filtry wynikow (typ/rynek/stan/ulubione)?"""
+        if self.f_typ.get() != "wszystkie" and r["property_type"] != self.f_typ.get():
+            return False
+        if self.f_rynek.get() != "wszystkie" and report_mod.wykryj_rynek(r) != self.f_rynek.get():
+            return False
+        if self.f_stan.get() != "wszystkie" and report_mod.wykryj_stan(r) != self.f_stan.get():
+            return False
+        if self.f_fav.get() and not r.get("favorite"):
+            return False
+        return True
+
+    def _odswiez_tabele(self) -> None:
         self.tree.delete(*self.tree.get_children())
         self._oferty.clear()
-        self._also_on, self._odl = also_on, odl
         prog = self._opt_float(self.e_prog) or 85.0
-        for r in wybrane:
+        pokazane = 0
+        for r in self._wszystkie:
+            if not self._filtr_wynikow(r):
+                continue
             iid = f"{r['site']}|{r['listing_id']}"
             self._oferty[iid] = r
-            km = odl.get((r["site"], r["listing_id"]))
-            okazja = report_mod.czy_okazja(r, mediany, prog)
+            km = self._odl.get((r["site"], r["listing_id"]))
+            tagi = ("okazja",) if report_mod.czy_okazja(r, self._mediany, prog) else ()
             wartosci = (
                 self._cena(r["price"]),
                 f"{r['area']:g}" if r["area"] else "",
@@ -442,12 +496,13 @@ class App:
                 r["site"],
                 (r["site_date"] or (r["first_seen"] or "")[:10]),
             )
-            tagi = ("okazja",) if okazja else ()
-            self.tree.insert("", "end", iid=iid, text=(r["title"] or "")[:80],
+            gwiazdka = "★ " if r.get("favorite") else ""
+            self.tree.insert("", "end", iid=iid, text=gwiazdka + (r["title"] or "")[:80],
                              values=wartosci, tags=tagi)
-        n = ", ".join(f"{report_mod.NAZWY[k]}: {liczby[k]}" for k in report_mod.KATEGORIE)
-        self.summary.configure(text=f"{n}   |   pokazano: {len(wybrane)}")
-        self._set_status(f"Raport gotowy: {len(wybrane)} ofert.")
+            pokazane += 1
+        n = ", ".join(f"{report_mod.NAZWY[k]}: {self._liczby.get(k, 0)}" for k in report_mod.KATEGORIE)
+        self.summary.configure(text=f"{n}   |   pokazano: {pokazane}")
+        self._set_status(f"Pokazano {pokazane} ofert.")
 
     # ================= panel szczegolow =================
     def _on_select(self, _evt=None) -> None:
@@ -459,6 +514,8 @@ class App:
             return
         self._aktualny_url = r["url"]
         self.b_otworz.configure(state="normal")
+        self.b_fav.configure(state="normal",
+                             text="★ Usun z ulubionych" if r.get("favorite") else "☆ Dodaj do ulubionych")
         self.det_title.configure(text=r["title"] or "(bez tytulu)")
 
         linie = []
@@ -573,26 +630,47 @@ class App:
         if self._aktualny_url:
             webbrowser.open(self._aktualny_url)
 
+    def _toggle_fav(self) -> None:
+        sel = self.tree.selection()
+        if not sel:
+            return
+        r = self._oferty.get(sel[0])
+        if not r:
+            return
+        nowy = 0 if r.get("favorite") else 1
+        r["favorite"] = nowy
+        db = Database(DB_PATH)
+        try:
+            db.set_favorite(r["site"], r["listing_id"], bool(nowy))
+        finally:
+            db.close()
+        self.b_fav.configure(text="★ Usun z ulubionych" if nowy else "☆ Dodaj do ulubionych")
+        # odswiez gwiazdke w wierszu (lub usun wiersz, gdy aktywny filtr 'tylko ulubione')
+        if self.f_fav.get() and not nowy:
+            self._odswiez_tabele()
+        elif self.tree.exists(sel[0]):
+            self.tree.item(sel[0], text=("★ " if nowy else "") + (r["title"] or "")[:80])
+
+    def _anuluj(self) -> None:
+        self._abort.set()
+        self._log("Przerywanie... (czekam na zakonczenie biezacych zapytan)")
+        self._set_status("Przerywanie...")
+
     def _eksport_md(self) -> None:
-        cfg = self._build_config()
-        if not cfg:
+        if not self._wszystkie:
+            messagebox.showinfo("Eksport", "Najpierw kliknij 'Pokaz oferty'.")
             return
         sciezka = filedialog.asksaveasfilename(defaultextension=".md", initialfile="raport.md",
                                                filetypes=[("Markdown", "*.md")])
         if not sciezka:
             return
-        db = Database(DB_PATH)
-        try:
-            rows = [dict(r) for r in fetch_filtered(cfg, db)]
-        finally:
-            db.close()
-        odl = oblicz_odleglosci(cfg, rows)
-        rows = report_mod.filtruj_po_km(rows, odl, cfg.max_km)
-        rows, _ = report_mod.deduplikuj(rows)
-        md = report_mod.render_markdown(rows, date.today(), self.v_kategoria.get(),
-                                        prog_okazji=cfg.okazja_prog_procent,
-                                        tylko_okazje=self.v_tylko_okazje.get(),
-                                        odleglosci=odl, sortuj_po_odleglosci=self.v_sortuj_odl.get())
+        # eksportujemy to, co aktualnie widac (z filtrami wynikow), bez ponownego geokodowania
+        widoczne = [r for r in self._wszystkie if self._filtr_wynikow(r)]
+        md = report_mod.render_markdown(
+            widoczne, date.today(), self.v_kategoria.get(),
+            prog_okazji=self._opt_float(self.e_prog) or 85.0,
+            tylko_okazje=self.v_tylko_okazje.get(),
+            odleglosci=self._odl, sortuj_po_odleglosci=self.v_sortuj_odl.get())
         Path(sciezka).write_text(md, encoding="utf-8")
         self._set_status(f"Raport zapisany: {sciezka}")
 
@@ -610,7 +688,11 @@ class App:
                     if gen == self._gen:                 # ignoruj wyniki starych zapytan
                         self._populate_tree(*reszta)
                 elif kind == "enable":
-                    self._set_running(False)
+                    if payload == self._gen:   # tylko biezace zapytanie
+                        self._wlacz_glowne()   # lista widoczna; Anuluj zostaje (geo w tle)
+                elif kind == "fin":
+                    if payload == self._gen:
+                        self._set_running(False)
                 elif kind == "one_detail":
                     self._zaktualizuj_detal(*payload)
                 elif kind == "done":
@@ -630,12 +712,21 @@ class App:
         self.root.after(120, self._drain_queue)
 
     # ================= pomocnicze =================
+    _GLOWNE = ("b_scrape", "b_raport", "b_detale", "b_zapisz", "b_eksport")
+
     def _set_running(self, running: bool) -> None:
-        for b in (self.b_scrape, self.b_raport, self.b_detale, self.b_zapisz, self.b_eksport):
-            b.configure(state="disabled" if running else "normal")
+        for nazwa in self._GLOWNE:
+            getattr(self, nazwa).configure(state="disabled" if running else "normal")
+        self.b_anuluj.configure(state="normal" if running else "disabled")
         if running:
+            self._abort.clear()
             self.progress.configure(value=0)
             self.progress_txt.configure(text="")
+
+    def _wlacz_glowne(self) -> None:
+        """Odblokowuje glowne przyciski, ale zostawia Anuluj (cos moze isc w tle)."""
+        for nazwa in self._GLOWNE:
+            getattr(self, nazwa).configure(state="normal")
 
     def _ustaw_postep(self, done: int, total: int) -> None:
         total = max(total, 1)

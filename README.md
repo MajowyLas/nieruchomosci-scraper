@@ -105,7 +105,18 @@ Dwa główne przyciski (po najechaniu pokazują podpowiedź):
 
 **Zdjęcia i opis dociągają się same po kliknięciu oferty** — nie trzeba osobnego
 kroku. Z boku są jeszcze przyciski pomocnicze: **Dociągnij zdjęcia (wszystkie)** —
-prefetch dla wszystkich ofert po filtrach naraz; **Zapisz ustawienia**; **Eksport**.
+prefetch dla wszystkich ofert po filtrach naraz; **Zapisz ustawienia**; **Eksport**;
+oraz **Anuluj** — przerywa trwające pobieranie (np. po pomyłce w parametrach).
+
+**Filtruj wyniki** (nad tabelą, działa natychmiast, bez ponownego pobierania):
+
+- **Typ** — mieszkanie / dom (gdy ściągniesz oba, przełączasz się między nimi),
+- **Rynek** — pierwotny / wtórny *(wykrywane heurystycznie ze słów w ogłoszeniu)*,
+- **Stan** — do wejścia / deweloperski / do remontu *(również heurystyka)*,
+- **tylko ulubione ★**.
+
+**Ulubione**: w panelu oferty kliknij **☆ Dodaj do ulubionych** — oferta dostaje ★
+i zapisuje się na stałe (w bazie). Podwójny klik na ofercie otwiera ją w przeglądarce.
 
 Okazje są wyróżnione kolorem. Pole **„Licz km od"** + **„Max km"** pozwala podać
 punkt odniesienia i promień — oferty dalej niż X km znikają, a w tabeli widać `km`.

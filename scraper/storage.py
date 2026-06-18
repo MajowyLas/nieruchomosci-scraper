@@ -130,6 +130,13 @@ class Database:
         )
         self.conn.commit()
 
+    def set_favorite(self, site: str, listing_id: str, fav: bool) -> None:
+        self.conn.execute(
+            "UPDATE listings SET favorite = ? WHERE site = ? AND listing_id = ?",
+            (1 if fav else 0, site, listing_id),
+        )
+        self.conn.commit()
+
     def fetch_all(self, sites: Optional[list[str]] = None,
                   types: Optional[list[str]] = None) -> list[sqlite3.Row]:
         sql = "SELECT * FROM listings"

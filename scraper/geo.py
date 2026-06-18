@@ -102,7 +102,7 @@ class Geocoder:
 
 
 def policz_odleglosci(rows, ref_coords: tuple[float, float], geocoder: Geocoder,
-                      log=lambda m: None, progress=None) -> dict[tuple[str, str], float]:
+                      log=lambda m: None, progress=None, stop=None) -> dict[tuple[str, str], float]:
     """Zwraca {(site, listing_id): km} - odleglosc oferty od punktu odniesienia.
 
     Geokoduje tylko UNIKALNE lokalizacje (wiele ofert dzieli te sama dzielnice),
@@ -117,6 +117,8 @@ def policz_odleglosci(rows, ref_coords: tuple[float, float], geocoder: Geocoder,
     razem = len(unikalne)
     log(f"Geokodowanie {razem} unikalnych lokalizacji...")
     for i, loc in enumerate(unikalne, 1):
+        if stop and stop():
+            break
         unikalne[loc] = geocoder.geocode(loc)
         if progress:
             progress(i, razem)
