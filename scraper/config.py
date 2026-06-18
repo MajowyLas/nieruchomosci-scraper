@@ -22,6 +22,7 @@ class Config:
     opoznienie: float = 1.5
     okazja_prog_procent: float = 85.0
     lokalizacja_odniesienia: Optional[str] = None
+    max_km: Optional[float] = None  # maksymalna odleglosc od punktu odniesienia
 
 
 def load_config(path: str | Path = "config.yaml") -> Config:
@@ -50,6 +51,7 @@ def load_config(path: str | Path = "config.yaml") -> Config:
         okazja_prog_procent=float(raw.get("okazja_prog_procent", 85)),
         lokalizacja_odniesienia=(str(raw["lokalizacja_odniesienia"]).strip()
                                  if raw.get("lokalizacja_odniesienia") else None),
+        max_km=_as_float(raw.get("max_km")),
     )
 
     # walidacja

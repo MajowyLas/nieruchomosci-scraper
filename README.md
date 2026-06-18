@@ -61,7 +61,8 @@ portale:                  # zakomentuj (#) te, których nie chcesz
 max_stron: 3              # ile stron wyników pobrać z każdego portalu
 opoznienie: 1.5           # sekundy między zapytaniami (uprzejmość wobec serwerów)
 okazja_prog_procent: 85   # próg okazji: cena/m² < 85% mediany (≥15% taniej)
-lokalizacja_odniesienia:  # adres/miasto do liczenia km (puste = nie licz odległości)
+lokalizacja_odniesienia:  # adres/miasto do liczenia km (puste = od miasta)
+max_km:                   # promień w km od punktu odniesienia (puste = bez limitu)
 ```
 
 ### Parametry wyszukiwania
@@ -73,6 +74,7 @@ lokalizacja_odniesienia:  # adres/miasto do liczenia km (puste = nie licz odleg�
 | `powierzchnia_min` / `powierzchnia_max` | metraż użytkowy w m² |
 | `pokoje_min` / `pokoje_max` | liczba pokoi |
 | `lokalizacja_odniesienia` | adres/miasto, od którego liczona jest odległość ofert (w km) |
+| `max_km` | maksymalny promień w km — odrzuca oferty dalej od punktu odniesienia |
 
 Filtry metrażu, pokoi i ceny są stosowane **na etapie raportu** — możesz je zmienić
 w `config.yaml` i od razu uruchomić raport ponownie, **bez ponownego scrapowania**
@@ -88,26 +90,33 @@ Jeśli wolisz klikać zamiast pisać w terminalu, uruchom graficzny interfejs:
 python ui.py
 ```
 
-W oknie ustawisz wszystkie parametry (miasto, rodzaj, cena, metraż, pokoje, portale),
-a przyciski robią resztę:
+W oknie ustawiasz parametry (miasto, rodzaj, cena, metraż, pokoje, portale, promień km),
+po lewej widzisz **tabelę ofert**, a po kliknięciu wiersza — **panel szczegółów ze
+zdjęciem** (miniatura, przewijanie strzałkami ◀ ▶, przycisk „Otwórz w przeglądarce").
+U góry pasek postępu pokazuje, że coś się dzieje, a na dole jest log.
+
+Przyciski:
 
 - **Zapisz parametry** — zapisuje ustawienia do `config.yaml`
-- **Pobierz świeże dane** — scrapuje portale (postęp widać na bieżąco)
-- **Scrapuj + raport** — pobiera dane i od razu pokazuje raport
-- **Pokaż raport** — wyświetla raport z bazy (bez pobierania z sieci)
-- **Zapisz raport (.md)** — eksport raportu do pliku Markdown
+- **Pobierz świeże dane** — scrapuje portale (postęp na pasku i w logu)
+- **Pokaż raport** — buduje listę ofert z bazy (z filtrami, odległościami, dedup)
+- **Szczegóły + zdjęcia** — pogłębia oferty po filtrach: wchodzi na ich podstrony i
+  pobiera m² działki, rok, piętro, opis i zdjęcia (wolne — 1 zapytanie na ofertę)
+- **Eksport .md** — zapis raportu do pliku Markdown
 
-Okazje są podświetlone na pomarańczowo, a **linki do ofert są klikalne** (otwierają
-się w przeglądarce). Pole **„Licz km od"** pozwala podać adres/miasto odniesienia —
-wtedy przy każdej ofercie pojawia się odległość `~X km`, a checkbox „sortuj wg
-odległości" układa wyniki od najbliższych. Aby uruchomić okno bez okienka konsoli
-w tle, użyj `pythonw ui.py` (możesz zrobić do tego skrót na pulpicie).
+Okazje są wyróżnione kolorem. Pole **„Licz km od"** + **„Max km"** pozwala podać
+punkt odniesienia i promień — oferty dalej niż X km znikają, a w tabeli widać `km`.
+Aby uruchomić okno bez okienka konsoli w tle, użyj `pythonw ui.py` (możesz zrobić do
+tego skrót na pulpicie).
 
 ## Użycie z terminala
 
 ```powershell
 # 1) Scrapuj portale i zapisz oferty do bazy
 python main.py scrape
+
+# 1b) Pogłęb oferty po filtrach (podstrony: działka, rok, opis, zdjęcia)
+python main.py detale
 
 # 2) Pokaż raport z bazy
 python main.py raport                      # domyślnie: wszystkie
@@ -172,6 +181,26 @@ bez klucza). Kilka uwag:
   w okolicznych miejscowościach.
 - Wymaga połączenia z internetem (tak jak samo scrapowanie).
 
+## Szczegóły ofert i zdjęcia
+
+Listy wyników dają podstawy (cena, metraż, lokalizacja). Komenda **`detale`** (lub
+przycisk **„Szczegóły + zdjęcia"** w oknie) wchodzi na podstronę każdej oferty
+**pasującej do filtrów** i dociąga:
+
+- **powierzchnię działki** (m²) — kluczowe przy domach,
+- rok budowy, piętro, skrócony opis,
+- **zdjęcia** — zapisywane do `data/photos/<portal>_<id>/`.
+
+To operacja kosztowna (1 zapytanie na ofertę), dlatego robimy ją tylko dla ofert po
+filtrach i **buforujemy** — raz pogłębiona oferta nie jest pobierana ponownie.
+Miniatury w oknie wymagają biblioteki **Pillow** (instalowana z `requirements.txt`).
+
+## Deduplikacja
+
+Ta sama nieruchomość bywa wystawiona na kilku portalach naraz. Raport **scala takie
+duplikaty** (po identycznym typie, metrażu i cenie) w jedną pozycję i dopisuje, na
+jakich innych portalach też się pojawia (np. „także na: gratka").
+
 ## Automatyczne uruchamianie raz dziennie (Windows)
 
 Aby kategorie były dokładne, warto scrapować codziennie. Najprościej przez
@@ -199,7 +228,8 @@ scraper/
 ├── parsing.py      # parsowanie ceny, powierzchni, dat (po polsku)
 ├── storage.py      # baza SQLite + logika first_seen
 ├── geo.py          # geokodowanie (Nominatim) + odległość (haversine)
-├── report.py       # kategoryzacja po dacie + wydruk/eksport
+├── detail.py       # pogłębianie ofert: podstrony + pobieranie zdjęć
+├── report.py       # kategoryzacja, dedup, wydruk/eksport
 └── sites/          # adaptery portali (jeden plik = jeden portal)
     ├── base.py
     ├── olx.py

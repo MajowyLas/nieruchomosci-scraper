@@ -7,11 +7,14 @@ from datetime import date
 from pathlib import Path
 from typing import Callable
 
+import requests
+
 from .config import load_config, Config
 from .http import HttpClient
 from .storage import Database
 from .sites import SCRAPERS
 from .geo import Geocoder, policz_odleglosci
+from .detail import extract_detail, pobierz_zdjecia
 from . import report as report_mod
 
 
@@ -62,19 +65,49 @@ def fetch_filtered(cfg: Config, db: Database) -> list[sqlite3.Row]:
     )
 
 
+def fetch_details(cfg: Config, db: Database, rows, log: Callable[[str], None] = lambda m: None,
+                  pobieraj_zdjecia: bool = True) -> int:
+    """Poglebia oferty (podstrona + zdjecia) - tylko te jeszcze niepobrane.
+    Zwraca liczbe poglebionych ofert."""
+    do_pobrania = [r for r in rows if not r["detail_fetched"]]
+    if not do_pobrania:
+        log("Wszystkie oferty maja juz pobrane szczegoly.")
+        return 0
+    client = HttpClient(delay=cfg.opoznienie)
+    foto = requests.Session()
+    log(f"Poglebianie {len(do_pobrania)} ofert (podstrona + zdjecia)...")
+    zrobione = 0
+    for i, r in enumerate(do_pobrania, 1):
+        resp = client.get(r["url"])
+        if resp is not None and resp.status_code == 200:
+            det = extract_detail(resp.text, r["site"], r["url"])
+            if pobieraj_zdjecia and det["image_urls"]:
+                dest = Path("data/photos") / f"{r['site']}_{r['listing_id']}"
+                pobierz_zdjecia(det["image_urls"], dest, session=foto)
+                det["photos_dir"] = str(dest)
+            db.update_detail(r["site"], r["listing_id"], det)
+            zrobione += 1
+        if i % 5 == 0 or i == len(do_pobrania):
+            log(f"  ...{i}/{len(do_pobrania)}")
+    log(f"Poglebiono {zrobione} ofert.")
+    return zrobione
+
+
 def oblicz_odleglosci(cfg: Config, rows, log: Callable[[str], None] = lambda m: None) -> dict:
     """Liczy odleglosc kazdej oferty od cfg.lokalizacja_odniesienia (w km).
     Pusty slownik, gdy lokalizacja nie podana lub nieznaleziona. Wspoldzielone
     przez CLI i GUI."""
-    if not cfg.lokalizacja_odniesienia:
+    # punkt odniesienia: jawnie podany, a gdy ustawiono tylko promien km - miasto
+    punkt = cfg.lokalizacja_odniesienia or (cfg.miasto if cfg.max_km else None)
+    if not punkt:
         return {}
     geo = Geocoder()
     try:
-        ref = geo.geocode(cfg.lokalizacja_odniesienia)
+        ref = geo.geocode(punkt)
         if not ref:
-            log(f"Nie znaleziono lokalizacji odniesienia: {cfg.lokalizacja_odniesienia}")
+            log(f"Nie znaleziono lokalizacji odniesienia: {punkt}")
             return {}
-        log(f"Punkt odniesienia: {cfg.lokalizacja_odniesienia} -> {ref[0]:.4f}, {ref[1]:.4f}")
+        log(f"Punkt odniesienia: {punkt} -> {ref[0]:.4f}, {ref[1]:.4f}")
         return policz_odleglosci(rows, ref, geo, log=log)
     finally:
         geo.close()
@@ -86,12 +119,15 @@ def run_report(cfg: Config, db: Database, kategoria: str, zapisz: str | None,
     dzis = date.today()
     prog = cfg.okazja_prog_procent
     odleglosci = oblicz_odleglosci(cfg, rows, log=print)
+    rows = report_mod.filtruj_po_km(rows, odleglosci, cfg.max_km)
+    rows, also_on = report_mod.deduplikuj(rows)
     if not bez_kolorow:
         _enable_windows_ansi()
     use_color = (not bez_kolorow) and sys.stdout.isatty()
     print(report_mod.render_terminal(rows, dzis, kategoria, use_color=use_color,
                                      prog_okazji=prog, tylko_okazje=tylko_okazje,
-                                     odleglosci=odleglosci, sortuj_po_odleglosci=sortuj_odleglosc))
+                                     odleglosci=odleglosci, sortuj_po_odleglosci=sortuj_odleglosc,
+                                     also_on=also_on))
     if zapisz:
         p = Path(zapisz)
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -114,6 +150,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="komenda")
 
     sub.add_parser("scrape", help="pobierz oferty i zapisz do bazy (bez raportu)")
+    sub.add_parser("detale", help="poglebia oferty po filtrach: podstrony + zdjecia")
 
     for nazwa in ("raport", "wszystko"):
         sp = sub.add_parser(
@@ -152,6 +189,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if komenda in ("scrape", "wszystko"):
             run_scrape(cfg, db)
+        if komenda == "detale":
+            fetch_details(cfg, db, fetch_filtered(cfg, db), log=print)
         if komenda in ("raport", "wszystko"):
             kategoria = getattr(args, "kategoria", "wszystkie")
             zapisz = getattr(args, "zapisz", None)

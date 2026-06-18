@@ -1,5 +1,6 @@
 """Warstwa przechowywania (SQLite) ze sledzeniem 'kiedy pierwszy raz widziane'."""
 from __future__ import annotations
+import json
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -23,10 +24,24 @@ CREATE TABLE IF NOT EXISTS listings (
     site_date     TEXT,
     first_seen    TEXT NOT NULL,   -- ISO datetime: kiedy oferta pojawila sie u nas
     last_seen     TEXT NOT NULL,   -- ISO datetime: kiedy ostatnio ja widzielismy
+    plot_area     REAL,            -- powierzchnia dzialki (m2) - z podstrony
+    floor         TEXT,            -- pietro - z podstrony
+    year_built    INTEGER,         -- rok budowy - z podstrony
+    description   TEXT,            -- opis - z podstrony
+    image_urls    TEXT,            -- JSON: lista adresow zdjec
+    photos_dir    TEXT,            -- katalog z pobranymi zdjeciami
+    detail_fetched INTEGER DEFAULT 0,  -- czy podstrona zostala pobrana
     PRIMARY KEY (site, listing_id)
 );
 CREATE INDEX IF NOT EXISTS idx_first_seen ON listings(first_seen);
 """
+
+# kolumny dodane po pierwszej wersji - migracja istniejacych baz
+_NOWE_KOLUMNY = {
+    "plot_area": "REAL", "floor": "TEXT", "year_built": "INTEGER",
+    "description": "TEXT", "image_urls": "TEXT", "photos_dir": "TEXT",
+    "detail_fetched": "INTEGER DEFAULT 0",
+}
 
 
 class Database:
@@ -36,7 +51,15 @@ class Database:
         self.conn = sqlite3.connect(self.path)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(_SCHEMA)
+        self._migrate()
         self.conn.commit()
+
+    def _migrate(self) -> None:
+        """Dodaje brakujace kolumny do istniejacej bazy (bezpieczne ALTER-y)."""
+        istniejace = {r["name"] for r in self.conn.execute("PRAGMA table_info(listings)")}
+        for kol, typ in _NOWE_KOLUMNY.items():
+            if kol not in istniejace:
+                self.conn.execute(f"ALTER TABLE listings ADD COLUMN {kol} {typ}")
 
     def upsert_many(self, listings: Iterable[Listing]) -> dict:
         """Zapisuje liste ofert. Zwraca statystyki {'nowe': N, 'znane': M}."""
@@ -93,6 +116,18 @@ class Database:
         if ls.site_date:
             return f"{ls.site_date}T00:00:00"
         return now
+
+    def update_detail(self, site: str, listing_id: str, detail: dict) -> None:
+        """Zapisuje dane z podstrony (dzialka, pietro, rok, opis, zdjecia)."""
+        self.conn.execute(
+            """UPDATE listings SET plot_area=?, floor=?, year_built=?, description=?,
+                   image_urls=?, photos_dir=?, detail_fetched=1
+               WHERE site=? AND listing_id=?""",
+            (detail.get("plot_area"), detail.get("floor"), detail.get("year_built"),
+             detail.get("description"), json.dumps(detail.get("image_urls") or []),
+             detail.get("photos_dir"), site, listing_id),
+        )
+        self.conn.commit()
 
     def fetch_all(self, sites: Optional[list[str]] = None,
                   types: Optional[list[str]] = None) -> list[sqlite3.Row]:

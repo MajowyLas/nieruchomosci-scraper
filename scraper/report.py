@@ -147,25 +147,93 @@ def _cena(v: Optional[int]) -> str:
     return f"{v:,}".replace(",", " ") + " zl"
 
 
+def _kol(row: sqlite3.Row, nazwa: str):
+    """Bezpieczny odczyt kolumny (moze nie istniec w starszych wynikach)."""
+    try:
+        return row[nazwa]
+    except (IndexError, KeyError):
+        return None
+
+
 def _szczegoly(row: sqlite3.Row) -> str:
     czesci = []
     if row["area"]:
         czesci.append(f"{row['area']:g} m2")
     if row["rooms"]:
         czesci.append(f"{row['rooms']} pok.")
+    if _kol(row, "plot_area"):
+        czesci.append(f"dzialka {round(_kol(row, 'plot_area'))} m2")
     if row["price"] and row["area"]:
         czesci.append(f"{round(row['price'] / row['area']):,}".replace(",", " ") + " zl/m2")
     return " | ".join(czesci)
 
 
+def deduplikuj(rows: list[sqlite3.Row]) -> tuple[list[sqlite3.Row], dict]:
+    """Laczy te same oferty z roznych portali (ta sama cena + metraz + typ).
+
+    Zwraca (oferty_bez_duplikatow, also_on), gdzie also_on[(site,id)] = lista
+    pozostalych portali, na ktorych ta sama oferta tez wisi.
+    """
+    grupy: dict[tuple, list[sqlite3.Row]] = {}
+    unikaty: list[sqlite3.Row] = []  # oferty bez pewnego klucza (nie laczymy)
+    for r in rows:
+        if r["area"] and r["price"]:
+            klucz = (r["property_type"], round(r["area"]), int(r["price"]))
+            grupy.setdefault(klucz, []).append(r)
+        else:
+            unikaty.append(r)
+
+    wynik: list[sqlite3.Row] = []
+    also_on: dict = {}
+    for grupa in grupy.values():
+        # zostawiamy oferte z najwieksza iloscia danych (pobrane szczegoly > reszta)
+        glowna = sorted(grupa, key=lambda r: (bool(_kol(r, "detail_fetched")), r["site"]),
+                        reverse=True)[0]
+        wynik.append(glowna)
+        inne = sorted({r["site"] for r in grupa} - {glowna["site"]})
+        if inne:
+            also_on[(glowna["site"], glowna["listing_id"])] = inne
+    wynik.extend(unikaty)
+    return wynik, also_on
+
+
+def wybierz_oferty(rows, dzis: date, kategoria: str, tylko_okazje: bool = False,
+                   prog_okazji: float = 85.0, odleglosci: dict | None = None,
+                   sortuj_po_odleglosci: bool = False):
+    """Wspolna logika: filtr kategorii czasowej + okazje + sortowanie.
+    Zwraca (wybrane_oferty, mediany). Uzywane i przez terminal, i przez okno."""
+    mediany = mediany_cen_m2(rows)
+    wybrane = [r for r in rows if naleznik_do_okna(_data_pierwszego(r), dzis, kategoria)]
+    if tylko_okazje:
+        wybrane = [r for r in wybrane if czy_okazja(r, mediany, prog_okazji)]
+    if sortuj_po_odleglosci and odleglosci:
+        wybrane.sort(key=lambda r: odleglosci.get((r["site"], r["listing_id"]), float("inf")))
+    else:
+        wybrane.sort(key=lambda r: (r["first_seen"], -(r["price"] or 0)), reverse=True)
+    return wybrane, mediany
+
+
+def filtruj_po_km(rows: list[sqlite3.Row], odleglosci: dict, max_km: Optional[float]) -> list[sqlite3.Row]:
+    """Usuwa oferty dalej niz max_km. Oferty bez znanej odleglosci zostawiamy."""
+    if not max_km or not odleglosci:
+        return rows
+    out = []
+    for r in rows:
+        km = odleglosci.get((r["site"], r["listing_id"]))
+        if km is None or km <= max_km:
+            out.append(r)
+    return out
+
+
 def render_terminal(rows: list[sqlite3.Row], dzis: date, kategoria: str,
                     use_color: bool = True, prog_okazji: float = 85.0,
                     tylko_okazje: bool = False, odleglosci: dict | None = None,
-                    sortuj_po_odleglosci: bool = False) -> str:
+                    sortuj_po_odleglosci: bool = False, also_on: dict | None = None) -> str:
     c = _C(use_color)
     linie: list[str] = []
     liczby = policz_kategorie(rows, dzis)
-    mediany = mediany_cen_m2(rows)  # 'norma' liczona z calego rynku w bazie
+    wybrane, mediany = wybierz_oferty(rows, dzis, kategoria, tylko_okazje, prog_okazji,
+                                      odleglosci, sortuj_po_odleglosci)
 
     linie.append("")
     linie.append(f"{c.B}{c.CYAN}{'=' * 64}{c.R}")
@@ -179,14 +247,6 @@ def render_terminal(rows: list[sqlite3.Row], dzis: date, kategoria: str,
     for typ, med in sorted(mediany.items()):
         linie.append(f"    {c.DIM}mediana {typ:<10} {round(med):>6,} zl/m2{c.R}".replace(",", " "))
     linie.append("")
-
-    wybrane = [r for r in rows if naleznik_do_okna(_data_pierwszego(r), dzis, kategoria)]
-    if tylko_okazje:
-        wybrane = [r for r in wybrane if czy_okazja(r, mediany, prog_okazji)]
-    if sortuj_po_odleglosci and odleglosci:
-        wybrane.sort(key=lambda r: odleglosci.get((r["site"], r["listing_id"]), float("inf")))
-    else:
-        wybrane.sort(key=lambda r: (r["first_seen"], -(r["price"] or 0)), reverse=True)
 
     tytul_sekcji = NAZWY[kategoria].upper() + (" - OKAZJE" if tylko_okazje else "")
     linie.append(f"  {c.B}{tytul_sekcji} ({len(wybrane)} ofert){c.R}")
@@ -211,6 +271,8 @@ def render_terminal(rows: list[sqlite3.Row], dzis: date, kategoria: str,
         km = odleglosci.get((row["site"], row["listing_id"])) if odleglosci else None
         if km is not None:
             loc_line += f"  {c.CYAN}~{km:.1f} km{c.R}"
+        if also_on and (row["site"], row["listing_id"]) in also_on:
+            loc_line += f"  {c.DIM}(takze na: {', '.join(also_on[(row['site'], row['listing_id'])])}){c.R}"
         linie.append(loc_line)
         linie.append(f"       {c.DIM}{row['url']}{c.R}")
         linie.append("")

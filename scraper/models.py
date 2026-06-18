@@ -1,6 +1,6 @@
 """Jednolity model ogloszenia, niezalezny od portalu."""
 from __future__ import annotations
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from typing import Optional
 
 
@@ -23,6 +23,14 @@ class Listing:
     property_type: str = ""         # "mieszkanie" lub "dom"
     transaction: str = "sprzedaz"   # rodzaj transakcji
     site_date: Optional[str] = None # data dodania wg portalu (ISO YYYY-MM-DD), jesli dostepna
+
+    # --- pola wypelniane dopiero przy "poglebianiu" (wejscie na podstrone) ---
+    plot_area: Optional[float] = None       # powierzchnia dzialki w m2
+    floor: Optional[str] = None             # pietro (tekst, np. "2/4")
+    year_built: Optional[int] = None        # rok budowy
+    description: Optional[str] = None        # skrocony opis
+    image_urls: list[str] = field(default_factory=list)  # adresy zdjec
+    detail_fetched: bool = False            # czy podstrona zostala juz pobrana
 
     def key(self) -> tuple[str, str]:
         """Klucz jednoznacznie identyfikujacy oferte (portal + ID)."""
