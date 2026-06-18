@@ -14,7 +14,7 @@ from .config import load_config, Config
 from .http import HttpClient, _DEFAULT_HEADERS
 from .storage import Database
 from .sites import SCRAPERS
-from .geo import Geocoder, policz_odleglosci
+from .geo import Geocoder, policz_odleglosci, geokoduj_wspolrzedne, haversine
 from .detail import extract_detail, pobierz_zdjecia
 from . import report as report_mod
 
@@ -154,6 +154,22 @@ def oblicz_odleglosci(cfg: Config, rows, log: Callable[[str], None] = lambda m: 
             return {}
         log(f"Punkt odniesienia: {punkt} -> {ref[0]:.4f}, {ref[1]:.4f}")
         return policz_odleglosci(rows, ref, geo, log=log, progress=progress, stop=stop)
+    finally:
+        geo.close()
+
+
+def oblicz_odleglosci_i_wsp(cfg: Config, rows, log: Callable[[str], None] = lambda m: None,
+                            progress=None, stop=None):
+    """Zwraca (km_dict, coords_dict, ref). Wspolrzedne sluza tez do mapy.
+    Punkt odniesienia: lokalizacja_odniesienia, inaczej miasto."""
+    punkt = cfg.lokalizacja_odniesienia or cfg.miasto
+    geo = Geocoder()
+    try:
+        ref = geo.geocode(punkt)
+        coords = geokoduj_wspolrzedne(rows, geo, log=log, progress=progress, stop=stop)
+        km = ({k: haversine(ref[0], ref[1], la, lo) for k, (la, lo) in coords.items()}
+              if ref else {})
+        return km, coords, ref
     finally:
         geo.close()
 

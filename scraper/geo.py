@@ -101,13 +101,10 @@ class Geocoder:
         self.conn.close()
 
 
-def policz_odleglosci(rows, ref_coords: tuple[float, float], geocoder: Geocoder,
-                      log=lambda m: None, progress=None, stop=None) -> dict[tuple[str, str], float]:
-    """Zwraca {(site, listing_id): km} - odleglosc oferty od punktu odniesienia.
-
-    Geokoduje tylko UNIKALNE lokalizacje (wiele ofert dzieli te sama dzielnice),
-    co minimalizuje liczbe zapytan do API. `progress(done, total)` raportuje postep.
-    """
+def geokoduj_wspolrzedne(rows, geocoder: Geocoder, log=lambda m: None,
+                         progress=None, stop=None) -> dict[tuple[str, str], tuple[float, float]]:
+    """Zwraca {(site, listing_id): (lat, lon)} dla ofert. Geokoduje tylko
+    UNIKALNE lokalizacje (oszczednosc zapytan). Uzywane przez odleglosci i mape."""
     unikalne: dict[str, Optional[tuple[float, float]]] = {}
     for r in rows:
         loc = (r["location"] or "").strip()
@@ -125,10 +122,16 @@ def policz_odleglosci(rows, ref_coords: tuple[float, float], geocoder: Geocoder,
         if i % 5 == 0 or i == razem:
             log(f"  ...{i}/{razem}")
 
-    odleglosci: dict[tuple[str, str], float] = {}
+    out: dict[tuple[str, str], tuple[float, float]] = {}
     for r in rows:
         coords = unikalne.get((r["location"] or "").strip())
         if coords:
-            km = haversine(ref_coords[0], ref_coords[1], coords[0], coords[1])
-            odleglosci[(r["site"], r["listing_id"])] = km
-    return odleglosci
+            out[(r["site"], r["listing_id"])] = coords
+    return out
+
+
+def policz_odleglosci(rows, ref_coords: tuple[float, float], geocoder: Geocoder,
+                      log=lambda m: None, progress=None, stop=None) -> dict[tuple[str, str], float]:
+    """{(site, listing_id): km} - odleglosc oferty od punktu odniesienia."""
+    coords = geokoduj_wspolrzedne(rows, geocoder, log=log, progress=progress, stop=stop)
+    return {k: haversine(ref_coords[0], ref_coords[1], la, lo) for k, (la, lo) in coords.items()}

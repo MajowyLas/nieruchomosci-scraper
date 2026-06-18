@@ -118,6 +118,10 @@ oraz **Anuluj** — przerywa trwające pobieranie (np. po pomyłce w parametrach
 **Ulubione**: w panelu oferty kliknij **☆ Dodaj do ulubionych** — oferta dostaje ★
 i zapisuje się na stałe (w bazie). Podwójny klik na ofercie otwiera ją w przeglądarce.
 
+**Mapa**: zakładka **Mapa** pokazuje oferty jako pinezki na mapie OpenStreetMap
+(biblioteka `tkintermapview`). Klik w pinezkę zaznacza ofertę na liście. Pozycje
+biorą się z geokodowania lokalizacji (te same współrzędne co przy liczeniu km).
+
 Okazje są wyróżnione kolorem. Pole **„Licz km od"** + **„Max km"** pozwala podać
 punkt odniesienia i promień — oferty dalej niż X km znikają, a w tabeli widać `km`.
 Aby uruchomić okno bez okienka konsoli w tle, użyj `pythonw ui.py` (możesz zrobić do

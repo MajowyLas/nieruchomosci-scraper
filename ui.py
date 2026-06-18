@@ -22,11 +22,20 @@ try:
 except ImportError:
     PIL_OK = False
 
+try:
+    import tkintermapview
+    MAP_OK = True
+except ImportError:
+    MAP_OK = False
+
+TARNOW = (50.0123, 20.9881)  # srodek Tarnowa - domyslny widok mapy
+
 import requests
 
 from scraper.config import Config, load_config
 from scraper.storage import Database
-from scraper.cli import run_scrape, fetch_filtered, fetch_details, oblicz_odleglosci
+from scraper.cli import (run_scrape, fetch_filtered, fetch_details, oblicz_odleglosci,
+                         oblicz_odleglosci_i_wsp)
 from scraper.detail import extract_detail, pobierz_zdjecia
 from scraper.http import _DEFAULT_HEADERS
 from scraper import report as report_mod
@@ -90,6 +99,8 @@ class App:
         self._liczby: dict = {}
         self._also_on: dict = {}
         self._odl: dict = {}
+        self._coords: dict = {}                  # (site,id) -> (lat,lon) dla mapy
+        self._map_gen = -1                       # dla ktorego zapytania mapa jest aktualna
         self._foto_lista: list[str] = []
         self._foto_idx = 0
         self._foto_ref = None                    # referencja na PhotoImage (anty-GC)
@@ -224,9 +235,13 @@ class App:
         ttk.Checkbutton(flt, text="tylko ulubione ★", variable=self.f_fav,
                         command=self._odswiez_tabele).pack(side="left", padx=(12, 0))
 
-        # --- glowny obszar: tabela ofert + panel szczegolow ---
-        pan = ttk.PanedWindow(self.root, orient="horizontal")
-        pan.pack(side="top", fill="both", expand=True, padx=8, pady=4)
+        # --- zakladki: Lista + Mapa ---
+        self.nb = ttk.Notebook(self.root)
+        self.nb.pack(side="top", fill="both", expand=True, padx=8, pady=4)
+        tab_lista = ttk.Frame(self.nb)
+        self.nb.add(tab_lista, text="Lista")
+        pan = ttk.PanedWindow(tab_lista, orient="horizontal")
+        pan.pack(fill="both", expand=True)
 
         lewy = ttk.Frame(pan)
         kolumny = ("cena", "m2", "dzialka", "pokoje", "km", "portal", "data")
@@ -249,6 +264,19 @@ class App:
         pan.add(lewy, weight=3)
 
         self._build_panel_szczegolow(pan)
+
+        # zakladka Mapa
+        tab_mapa = ttk.Frame(self.nb)
+        self.nb.add(tab_mapa, text="Mapa")
+        if MAP_OK:
+            self.map_widget = tkintermapview.TkinterMapView(tab_mapa, corner_radius=0)
+            self.map_widget.pack(fill="both", expand=True)
+            self.map_widget.set_position(*TARNOW)
+            self.map_widget.set_zoom(11)
+        else:
+            self.map_widget = None
+            ttk.Label(tab_mapa, text="Mapa niedostepna - zainstaluj: pip install tkintermapview").pack(pady=20)
+        self.nb.bind("<<NotebookTabChanged>>", self._tab_zmieniona)
 
         # --- log na dole ---
         logf = ttk.LabelFrame(self.root, text="Log", padding=4)
@@ -445,9 +473,11 @@ class App:
             if cfg.lokalizacja_odniesienia or cfg.max_km:
                 self._q.put(("log", "Licze odleglosci w tle (lista juz widoczna)..."))
                 okno = report_mod.tylko_w_oknie(rows, dzis, kat)
-                odl = oblicz_odleglosci(cfg, okno, log=lambda m: self._q.put(("log", m)),
-                                        progress=lambda d, t: self._q.put(("progress", (d, t))),
-                                        stop=self._abort.is_set)
+                odl, coords, _ref = oblicz_odleglosci_i_wsp(
+                    cfg, okno, log=lambda m: self._q.put(("log", m)),
+                    progress=lambda d, t: self._q.put(("progress", (d, t))),
+                    stop=self._abort.is_set)
+                self._q.put(("coords", (gen, coords)))    # wspolrzedne dla mapy
                 r2 = report_mod.filtruj_po_km(rows, odl, cfg.max_km)
                 r2, also2 = report_mod.deduplikuj(r2)
                 wyb2, med2 = report_mod.wybierz_oferty(r2, dzis, kat, tylko, cfg.okazja_prog_procent,
@@ -630,6 +660,60 @@ class App:
         if self._aktualny_url:
             webbrowser.open(self._aktualny_url)
 
+    # ================= mapa =================
+    def _na_mapie(self) -> bool:
+        return bool(self.map_widget) and self.nb.index(self.nb.select()) == 1
+
+    def _tab_zmieniona(self, _evt=None) -> None:
+        if not self._na_mapie():
+            return
+        if self._map_gen == self._gen and self._coords:
+            self._ustaw_markery()
+        elif self._oferty:
+            cfg = self._build_config()
+            if not cfg:
+                return
+            self._set_status("Wczytuje mape (geokodowanie w tle)...")
+            threading.Thread(target=self._map_worker,
+                             args=(self._gen, list(self._oferty.values()), cfg), daemon=True).start()
+
+    def _map_worker(self, gen, rows, cfg) -> None:
+        try:
+            _km, coords, _ref = oblicz_odleglosci_i_wsp(
+                cfg, rows, log=lambda m: self._q.put(("log", m)),
+                progress=lambda d, t: self._q.put(("progress", (d, t))), stop=self._abort.is_set)
+            self._q.put(("map_points", (gen, coords)))
+        except Exception as e:
+            self._q.put(("log", f"Mapa: {type(e).__name__}: {e}"))
+
+    def _ustaw_markery(self) -> None:
+        if not self.map_widget:
+            return
+        self.map_widget.delete_all_marker()
+        laty, lony = [], []
+        for (site, lid), (la, lo) in self._coords.items():
+            r = self._oferty.get(f"{site}|{lid}")
+            if not r:
+                continue
+            tekst = f"{self._cena(r['price'])} - {(r['title'] or '')[:24]}"
+            self.map_widget.set_marker(la, lo, text=tekst,
+                                       command=lambda marker, i=f"{site}|{lid}": self._marker_klik(i))
+            laty.append(la)
+            lony.append(lo)
+        if laty:
+            try:
+                self.map_widget.fit_bounding_box((max(laty), min(lony)), (min(laty), max(lony)))
+            except Exception:
+                pass
+        self._set_status(f"Mapa: {len(laty)} ofert z lokalizacja.")
+
+    def _marker_klik(self, iid: str) -> None:
+        self.nb.select(0)  # wroc na liste
+        if self.tree.exists(iid):
+            self.tree.selection_set(iid)
+            self.tree.see(iid)
+            self._on_select()
+
     def _toggle_fav(self) -> None:
         sel = self.tree.selection()
         if not sel:
@@ -693,6 +777,13 @@ class App:
                 elif kind == "fin":
                     if payload == self._gen:
                         self._set_running(False)
+                elif kind in ("coords", "map_points"):
+                    gen, coords = payload
+                    if gen == self._gen:
+                        self._coords = coords
+                        self._map_gen = gen
+                        if self._na_mapie():
+                            self._ustaw_markery()
                 elif kind == "one_detail":
                     self._zaktualizuj_detal(*payload)
                 elif kind == "done":
