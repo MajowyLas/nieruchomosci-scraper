@@ -78,7 +78,27 @@ w `config.yaml` i od razu uruchomić raport ponownie, **bez ponownego scrapowani
 cechy (np. brak liczby pokoi), nie jest odrzucana — żeby nie zgubić trafnych
 ogłoszeń z niekompletnymi danymi.
 
-## Użycie
+## Najprościej: okno (UI)
+
+Jeśli wolisz klikać zamiast pisać w terminalu, uruchom graficzny interfejs:
+
+```powershell
+python ui.py
+```
+
+W oknie ustawisz wszystkie parametry (miasto, rodzaj, cena, metraż, pokoje, portale),
+a przyciski robią resztę:
+
+- **Zapisz parametry** — zapisuje ustawienia do `config.yaml`
+- **Pobierz świeże dane** — scrapuje portale (postęp widać na bieżąco)
+- **Scrapuj + raport** — pobiera dane i od razu pokazuje raport
+- **Pokaż raport** — wyświetla raport z bazy (bez pobierania z sieci)
+- **Zapisz raport (.md)** — eksport raportu do pliku Markdown
+
+Okazje są podświetlone na pomarańczowo. Aby uruchomić okno bez okienka konsoli w tle,
+użyj `pythonw ui.py` (możesz zrobić do tego skrót na pulpicie).
+
+## Użycie z terminala
 
 ```powershell
 # 1) Scrapuj portale i zapisz oferty do bazy
@@ -145,6 +165,9 @@ Aby kategorie były dokładne, warto scrapować codziennie. Najprościej przez
 ## Struktura projektu
 
 ```
+main.py             # punkt wejścia CLI (python main.py ...)
+ui.py               # okno graficzne (python ui.py)
+config.yaml         # parametry wyszukiwania
 scraper/
 ├── cli.py          # interfejs wiersza poleceń (komendy scrape/raport/wszystko)
 ├── config.py       # wczytywanie config.yaml

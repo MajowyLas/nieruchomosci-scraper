@@ -1,9 +1,11 @@
 """Interfejs wiersza polecen: scrape / raport / wszystko."""
 from __future__ import annotations
 import argparse
+import sqlite3
 import sys
 from datetime import date
 from pathlib import Path
+from typing import Callable
 
 from .config import load_config, Config
 from .http import HttpClient
@@ -24,37 +26,44 @@ def _enable_windows_ansi() -> None:
         pass
 
 
-def run_scrape(cfg: Config, db: Database) -> None:
+def run_scrape(cfg: Config, db: Database, log: Callable[[str], None] = print) -> None:
+    """Scrapuje portale i zapisuje do bazy. `log` pozwala przekierowac komunikaty
+    (CLI -> print, GUI -> okno)."""
     client = HttpClient(delay=cfg.opoznienie)
-    print(f"\nScrapuje portale: {', '.join(cfg.portale)}")
-    print(f"Miasto: {cfg.miasto} | typy: {', '.join(cfg.typy)} | max stron: {cfg.max_stron}\n")
+    log(f"Scrapuje portale: {', '.join(cfg.portale)}")
+    log(f"Miasto: {cfg.miasto} | typy: {', '.join(cfg.typy)} | max stron: {cfg.max_stron}")
     suma_nowe, suma_znane = 0, 0
     for nazwa in cfg.portale:
         klasa = SCRAPERS.get(nazwa)
         if not klasa:
-            print(f"  [!] Nieznany portal '{nazwa}' - pomijam (dostepne: {', '.join(SCRAPERS)})")
+            log(f"  [!] Nieznany portal '{nazwa}' - pomijam")
             continue
-        print(f"  -> {nazwa} ...", end=" ", flush=True)
         try:
             oferty = klasa(client, cfg).scrape()
             stat = db.upsert_many(oferty)
             suma_nowe += stat["nowe"]
             suma_znane += stat["znane"]
-            print(f"pobrano {len(oferty)} (nowe: {stat['nowe']}, znane: {stat['znane']})")
+            log(f"  {nazwa}: pobrano {len(oferty)} (nowe: {stat['nowe']}, znane: {stat['znane']})")
         except Exception as e:  # jeden portal nie moze polozyc calego scrapowania
-            print(f"BLAD: {type(e).__name__}: {e}")
-    print(f"\nRazem: {suma_nowe} nowych, {suma_znane} znanych ofert zapisanych do bazy.")
+            log(f"  {nazwa}: BLAD: {type(e).__name__}: {e}")
+    log(f"Razem: {suma_nowe} nowych, {suma_znane} znanych ofert zapisanych do bazy.")
 
 
-def run_report(cfg: Config, db: Database, kategoria: str, zapisz: str | None,
-               bez_kolorow: bool, tylko_okazje: bool) -> None:
+def fetch_filtered(cfg: Config, db: Database) -> list[sqlite3.Row]:
+    """Pobiera oferty z bazy i stosuje filtry parametrow z konfiguracji.
+    Wspoldzielone przez raport CLI i GUI."""
     rows = db.fetch_all(sites=cfg.portale, types=cfg.typy)
-    rows = report_mod.filtruj_oferty(
+    return report_mod.filtruj_oferty(
         rows,
         cena=(cfg.cena_min, cfg.cena_max),
         powierzchnia=(cfg.powierzchnia_min, cfg.powierzchnia_max),
         pokoje=(cfg.pokoje_min, cfg.pokoje_max),
     )
+
+
+def run_report(cfg: Config, db: Database, kategoria: str, zapisz: str | None,
+               bez_kolorow: bool, tylko_okazje: bool) -> None:
+    rows = fetch_filtered(cfg, db)
     dzis = date.today()
     prog = cfg.okazja_prog_procent
     if not bez_kolorow:
