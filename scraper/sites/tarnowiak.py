@@ -16,6 +16,37 @@ from ..parsing import parse_price, parse_area, parse_rooms, parse_site_date, cle
 
 _BASE = "https://tarnowiak.pl"
 _KATEGORIA = {"mieszkanie": "mieszkania", "dom": "domy"}
+
+# duza litera (z polskimi) + reszta wyrazu - do wylapania nazwy miejscowosci
+_MIEJSCE = r"([A-ZŁŚŻŹĆĄĘÓŃ][\w\-]+(?:[ \-][A-ZŁŚŻŹĆĄĘÓŃ][\w\-]+)?)"
+# slowa, ktore NIE sa miejscowoscia (czeste w tytulach)
+_NIE_MIEJSCE = {"dom", "domy", "mieszkanie", "mieszkania", "dzialka", "działka", "działkę",
+                "sprzedam", "sprzedaż", "sprzedaz", "okazja", "nowy", "nowa", "nowe", "pilnie",
+                "ladny", "ładny", "super", "stan", "stanie", "cenie", "centrum", "stodoła",
+                "stodola", "stajnia", "stajnią", "garaz", "garaż", "do", "na", "od", "ha", "ar"}
+
+
+def _czysta(nazwa: str) -> Optional[str]:
+    return None if nazwa.split()[0].lower() in _NIE_MIEJSCE else nazwa
+
+
+def miejscowosc_z_tytulu(title: str) -> str:
+    """Wyciaga miejscowosc z tytulu Tarnowiaka (location na liscie to zawsze
+    'Tarnów', wiec dla odleglosci potrzebujemy konkretu z tytulu). Heurystyka."""
+    t = title or ""
+    m = re.search(r"gm(?:in\w*|\.)\s+" + _MIEJSCE, t)            # 'gm. Pinczow' / 'gminie Solec'
+    if m and _czysta(m.group(1)):
+        return m.group(1) + ", małopolskie"
+    if re.search(r"tarn[oó]w", t, re.IGNORECASE):               # Tarnów (+ dzielnica)
+        m = re.search(r"[Tt]arn[oó]w[ ,\-]+" + _MIEJSCE, t)
+        return "Tarnów " + m.group(1) if m and _czysta(m.group(1)) else "Tarnów"
+    m = re.search(r"\b(?:w|we)\s+" + _MIEJSCE, t)                # 'Dom w Zawarzy'
+    if m and _czysta(m.group(1)):
+        return m.group(1) + ", małopolskie"
+    m = re.search(r"[-–]\s*" + _MIEJSCE + r"\s*$", t.strip())    # 'Dom ... - Tuchów'
+    if m and _czysta(m.group(1)):
+        return m.group(1) + ", małopolskie"
+    return "Tarnów"
 # slowa kluczowe potwierdzajace, ze oferta jest z danej kategorii
 _KEYWORDS = {
     "mieszkanie": ("mieszkan", "kawalerka", "apartament", "pokoj", "pokój", "m2", "m²"),
@@ -61,7 +92,7 @@ class TarnowiakScraper(BaseScraper):
             date_el = a.select_one(".box_content_date")
             date_txt = clean_text(date_el.get_text(" ", strip=True)) if date_el else ""
 
-            location = "Tarnów" if "tarn" in blob else self.config.miasto.capitalize()
+            location = miejscowosc_z_tytulu(title)
 
             out.append(Listing(
                 site=self.name,

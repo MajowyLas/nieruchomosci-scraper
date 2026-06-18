@@ -51,13 +51,25 @@ def parse_area(text: Optional[str]) -> Optional[float]:
         return None
 
 
+_SLOWNE_POKOJE = {"jedno": 1, "dwu": 2, "trzy": 3, "cztero": 4, "czter": 4,
+                  "pięcio": 5, "piecio": 5, "sześcio": 6, "szescio": 6}
+
+
 def parse_rooms(text: Optional[str]) -> Optional[int]:
-    """'3 pokoje' / '2-pokojowe' -> 3 / 2"""
+    """'3 pokoje' / '2-pokojowe' / '2 - pokojowe' / 'trzypokojowe' / 'kawalerka' -> liczba."""
     if not text:
         return None
-    m = re.search(r"(\d+)\s*[- ]?pok", text.lower())
+    t = text.lower()
+    # cyfra + dowolne myslniki/spacje + 'pok'  (np. '2 - pokojowe', '3-pok', '2 pokoje')
+    m = re.search(r"(\d+)\s*[-\s]*pok", t)
     if m:
         return int(m.group(1))
+    if "kawalerka" in t:
+        return 1
+    # zapis slowny: 'dwupokojowe', 'trzy pokojowe', ...
+    m = re.search(r"(jedno|dwu|trzy|cztero|czter|pięcio|piecio|sześcio|szescio)\s*-?\s*pokoj", t)
+    if m:
+        return _SLOWNE_POKOJE.get(m.group(1))
     return None
 
 
