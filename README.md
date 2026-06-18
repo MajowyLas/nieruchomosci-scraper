@@ -96,16 +96,16 @@ zdjęciem** (miniatura, przewijanie strzałkami ◀ ▶, przycisk „Otwórz w p
 U góry **pasek postępu** wypełnia się proporcjonalnie do wykonanej pracy (np. `7/20`
 pogłębionych ofert), a na dole jest log.
 
-Przyciski są ponumerowane wg kolejności (po najechaniu pokazują podpowiedź):
+Dwa główne przyciski (po najechaniu pokazują podpowiedź):
 
-- **1. Pobierz oferty z portali** — scrapuje portale przez internet (wolne, rób raz
-  na jakiś czas); postęp na pasku i w logu
-- **2. Pokaż oferty** — buduje listę z już pobranych danych wg filtrów (szybkie —
-  klikaj po każdej zmianie parametrów); uwzględnia odległości i dedup
-- **3. Dociągnij zdjęcia i opisy** — pogłębia oferty po filtrach: wchodzi na ich
-  podstrony i pobiera m² działki, rok, piętro, opis i zdjęcia (wolne — 1 zapytanie/ofertę)
-- **Zapisz ustawienia** — zapisuje parametry do `config.yaml`
-- **Eksport do pliku** — zapis listy do pliku Markdown
+- **Pobierz dane z portali** — scrapuje świeże oferty przez internet i od razu
+  pokazuje listę (rób, gdy chcesz odświeżyć dane, np. raz dziennie)
+- **Pokaż oferty** — buduje listę z już pobranych danych wg filtrów (szybkie —
+  lista pojawia się od razu, a odległości doliczają się w tle)
+
+**Zdjęcia i opis dociągają się same po kliknięciu oferty** — nie trzeba osobnego
+kroku. Z boku są jeszcze przyciski pomocnicze: **Dociągnij zdjęcia (wszystkie)** —
+prefetch dla wszystkich ofert po filtrach naraz; **Zapisz ustawienia**; **Eksport**.
 
 Okazje są wyróżnione kolorem. Pole **„Licz km od"** + **„Max km"** pozwala podać
 punkt odniesienia i promień — oferty dalej niż X km znikają, a w tabeli widać `km`.

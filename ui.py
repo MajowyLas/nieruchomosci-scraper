@@ -22,9 +22,13 @@ try:
 except ImportError:
     PIL_OK = False
 
+import requests
+
 from scraper.config import Config, load_config
 from scraper.storage import Database
 from scraper.cli import run_scrape, fetch_filtered, fetch_details, oblicz_odleglosci
+from scraper.detail import extract_detail, pobierz_zdjecia
+from scraper.http import _DEFAULT_HEADERS
 from scraper import report as report_mod
 
 CONFIG_PATH = "config.yaml"
@@ -77,7 +81,8 @@ class App:
         self.root.title("Scraper nieruchomosci")
         self.root.geometry("1180x820")
         self._q: queue.Queue = queue.Queue()
-        self._then_report = False
+        self._gen = 0                            # token zapytania (anty-wyscig)
+        self._fetching_detale: set[str] = set()  # iid ofert aktualnie doszczegolawianych
         self._oferty: dict[str, dict] = {}      # iid -> wiersz (dict)
         self._also_on: dict = {}
         self._odl: dict = {}
@@ -88,6 +93,7 @@ class App:
         self._build_widgets()
         self._wczytaj_z_config()
         self.root.after(120, self._drain_queue)
+        self.root.after(250, self._pokaz_raport)  # pokaz oferty z bazy od razu po starcie
 
     # ================= budowa interfejsu =================
     def _build_widgets(self) -> None:
@@ -150,33 +156,35 @@ class App:
         self.v_sortuj_odl = tk.BooleanVar(value=False)
         ttk.Checkbutton(rap, text="sortuj wg odleglosci", variable=self.v_sortuj_odl).pack(anchor="w")
 
-        # --- przyciski akcji (z linijka kolejnosci i tooltipami) ---
-        akcje = ttk.Frame(self.root, padding=(8, 0))
+        # --- przyciski akcji: dwa glowne + reszta z boku ---
+        akcje = ttk.Frame(self.root, padding=(8, 2))
         akcje.pack(side="top", fill="x")
+        btns = ttk.Frame(akcje)
+        btns.pack(fill="x")
+        self.b_scrape = ttk.Button(btns, text="Pobierz dane z portali",
+                                   command=lambda: self._start_scrape(False))
+        self.b_raport = ttk.Button(btns, text="Pokaz oferty", command=self._pokaz_raport)
+        self.b_scrape.pack(side="left", padx=(0, 4), pady=4)
+        self.b_raport.pack(side="left", padx=4, pady=4)
+        ttk.Separator(btns, orient="vertical").pack(side="left", fill="y", padx=12, pady=4)
+        self.b_detale = ttk.Button(btns, text="Dociagnij zdjecia (wszystkie)", command=self._start_details)
+        self.b_zapisz = ttk.Button(btns, text="Zapisz ustawienia", command=self._zapisz_config)
+        self.b_eksport = ttk.Button(btns, text="Eksport", command=self._eksport_md)
+        for b in (self.b_detale, self.b_zapisz, self.b_eksport):
+            b.pack(side="left", padx=3, pady=4)
         ttk.Label(
             akcje,
-            text="Kolejnosc: 1) Pobierz oferty z portali  →  2) Pokaz oferty  "
-                 "→  3) (opcjonalnie) Dociagnij zdjecia.   Po najechaniu na przycisk pojawi sie podpowiedz.",
-            foreground="#666",
-        ).pack(anchor="w", pady=(4, 0))
-        btns = ttk.Frame(akcje)
-        btns.pack(fill="x", pady=(2, 4))
-        self.b_scrape = ttk.Button(btns, text="1. Pobierz oferty z portali",
-                                   command=lambda: self._start_scrape(False))
-        self.b_raport = ttk.Button(btns, text="2. Pokaz oferty", command=self._pokaz_raport)
-        self.b_detale = ttk.Button(btns, text="3. Dociagnij zdjecia i opisy", command=self._start_details)
-        ttk.Separator(btns, orient="vertical").pack(side="left", fill="y", padx=8, pady=2)
-        self.b_zapisz = ttk.Button(btns, text="Zapisz ustawienia", command=self._zapisz_config)
-        self.b_eksport = ttk.Button(btns, text="Eksport do pliku", command=self._eksport_md)
-        for b in (self.b_scrape, self.b_raport, self.b_detale, self.b_zapisz, self.b_eksport):
-            b.pack(side="left", padx=4, pady=6)
+            text="Ustaw filtry po lewej, potem: Pobierz dane (z internetu, rzadko) → Pokaz oferty "
+                 "(z bazy, szybko). Zdjecia oferty dociagaja sie po jej kliknięciu.",
+            foreground="#777",
+        ).pack(anchor="w", pady=(2, 0))
 
-        Tooltip(self.b_scrape, "Pobiera AKTUALNE oferty z portali (przez internet) i zapisuje "
-                               "do lokalnej bazy. WOLNE - rob raz na jakis czas (np. raz dziennie).")
-        Tooltip(self.b_raport, "Buduje liste ofert z JUZ pobranych danych wg ustawionych filtrow. "
-                               "Szybkie - klikaj po kazdej zmianie parametrow.")
-        Tooltip(self.b_detale, "Wchodzi na podstrony ofert (tych po filtrach) i dociaga m2 dzialki, "
-                               "rok, opis i zdjecia. WOLNE - 1 zapytanie na oferte, wynik buforowany.")
+        Tooltip(self.b_scrape, "Pobiera AKTUALNE oferty z portali (przez internet) i zapisuje do bazy. "
+                               "Wolniejsze - rob, gdy chcesz odswiezyc dane (np. raz dziennie).")
+        Tooltip(self.b_raport, "Pokazuje oferty z juz pobranych danych wg filtrow. Szybkie - "
+                               "klikaj po kazdej zmianie parametrow. Odleglosci dolicza sie w tle.")
+        Tooltip(self.b_detale, "Z gory pobiera zdjecia i opisy dla WSZYSTKICH ofert po filtrach. "
+                               "Opcjonalne - i tak dociagaja sie pojedynczo po kliknieciu oferty.")
         Tooltip(self.b_zapisz, "Zapisuje biezace ustawienia formularza do pliku config.yaml.")
         Tooltip(self.b_eksport, "Zapisuje liste ofert do pliku Markdown (.md).")
 
@@ -349,7 +357,7 @@ class App:
                            progress=lambda d, t: self._q.put(("progress", (d, t))))
             finally:
                 db.close()
-            self._q.put(("done", "Scrapowanie zakonczone."))
+            self._q.put(("done_refresh", cfg))   # po pobraniu od razu pokaz liste
         except Exception as e:
             self._q.put(("error", f"{type(e).__name__}: {e}"))
 
@@ -381,27 +389,37 @@ class App:
         if not cfg:
             return
         kat, tylko, sortuj = self.v_kategoria.get(), self.v_tylko_okazje.get(), self.v_sortuj_odl.get()
+        self._gen += 1                       # token: ignorujemy wyniki starych zapytan
         self._set_running(True)
-        self._set_status("Przygotowuje raport...")
-        threading.Thread(target=self._offers_worker, args=(cfg, kat, tylko, sortuj),
+        self._set_status("Przygotowuje liste...")
+        threading.Thread(target=self._offers_worker, args=(self._gen, cfg, kat, tylko, sortuj),
                          daemon=True).start()
 
-    def _offers_worker(self, cfg, kat, tylko, sortuj) -> None:
+    def _offers_worker(self, gen, cfg, kat, tylko, sortuj) -> None:
         try:
             db = Database(DB_PATH)
             try:
                 rows = [dict(r) for r in fetch_filtered(cfg, db)]
             finally:
                 db.close()
-            okno = report_mod.tylko_w_oknie(rows, date.today(), kat)
-            odl = oblicz_odleglosci(cfg, okno, log=lambda m: self._q.put(("log", m)),
-                                    progress=lambda d, t: self._q.put(("progress", (d, t))))
-            rows = report_mod.filtruj_po_km(rows, odl, cfg.max_km)
-            rows, also_on = report_mod.deduplikuj(rows)
-            liczby = report_mod.policz_kategorie(rows, date.today())
-            wybrane, mediany = report_mod.wybierz_oferty(
-                rows, date.today(), kat, tylko, cfg.okazja_prog_procent, odl, sortuj)
-            self._q.put(("offers", (wybrane, also_on, odl, mediany, liczby)))
+            dzis = date.today()
+            liczby = report_mod.policz_kategorie(rows, dzis)
+            # 1) NATYCHMIAST pokaz oferty bez odleglosci - okno nie czeka na geokodowanie
+            r0, also0 = report_mod.deduplikuj(rows)
+            wyb0, med0 = report_mod.wybierz_oferty(r0, dzis, kat, tylko, cfg.okazja_prog_procent, {}, False)
+            self._q.put(("offers", (gen, wyb0, also0, {}, med0, liczby)))
+            self._q.put(("enable", None))    # lista widoczna, przyciski znow aktywne
+            # 2) jesli trzeba - policz odleglosci w TLE i odswiez liste
+            if cfg.lokalizacja_odniesienia or cfg.max_km:
+                self._q.put(("log", "Licze odleglosci w tle (lista juz widoczna)..."))
+                okno = report_mod.tylko_w_oknie(rows, dzis, kat)
+                odl = oblicz_odleglosci(cfg, okno, log=lambda m: self._q.put(("log", m)),
+                                        progress=lambda d, t: self._q.put(("progress", (d, t))))
+                r2 = report_mod.filtruj_po_km(rows, odl, cfg.max_km)
+                r2, also2 = report_mod.deduplikuj(r2)
+                wyb2, med2 = report_mod.wybierz_oferty(r2, dzis, kat, tylko, cfg.okazja_prog_procent,
+                                                       odl, sortuj)
+                self._q.put(("offers", (gen, wyb2, also2, odl, med2, liczby)))
         except Exception as e:
             self._q.put(("error", f"{type(e).__name__}: {e}"))
 
@@ -478,6 +496,51 @@ class App:
         self._foto_idx = 0
         self._pokaz_foto()
 
+        # zdjecia/opis na zadanie: jesli oferta nie byla jeszcze poglebiona, dociagnij ja w tle
+        iid = f"{r['site']}|{r['listing_id']}"
+        if not r.get("detail_fetched") and iid not in self._fetching_detale:
+            self._fetching_detale.add(iid)
+            self.foto.configure(image="", text="(pobieram zdjecia...)")
+            threading.Thread(target=self._one_detail_worker, args=(iid, dict(r)), daemon=True).start()
+
+    def _one_detail_worker(self, iid: str, r: dict) -> None:
+        try:
+            sess = requests.Session()
+            sess.headers.update(_DEFAULT_HEADERS)
+            resp = sess.get(r["url"], timeout=25)
+            if resp.status_code != 200:
+                self._q.put(("one_detail", (iid, None)))
+                return
+            det = extract_detail(resp.text, r["site"], r["url"])
+            if det["image_urls"]:
+                dest = Path("data/photos") / f"{r['site']}_{r['listing_id']}"
+                pobierz_zdjecia(det["image_urls"], dest, session=sess)
+                det["photos_dir"] = str(dest)
+            db = Database(DB_PATH)
+            try:
+                db.update_detail(r["site"], r["listing_id"], det)
+            finally:
+                db.close()
+            self._q.put(("one_detail", (iid, det)))
+        except Exception as e:
+            self._q.put(("log", f"Szczegoly oferty: {type(e).__name__}: {e}"))
+            self._q.put(("one_detail", (iid, None)))
+
+    def _zaktualizuj_detal(self, iid: str, det) -> None:
+        self._fetching_detale.discard(iid)
+        r = self._oferty.get(iid)
+        if r is None:
+            return
+        r["detail_fetched"] = 1
+        if det:
+            for pole in ("plot_area", "floor", "year_built", "description", "photos_dir"):
+                r[pole] = det.get(pole)
+            if self.tree.exists(iid) and det.get("plot_area"):
+                self.tree.set(iid, "dzialka", str(round(det["plot_area"])))
+        sel = self.tree.selection()
+        if sel and sel[0] == iid:      # odswiez panel, jesli oferta nadal zaznaczona
+            self._on_select()
+
     def _znajdz_zdjecia(self, r) -> list[str]:
         d = r.get("photos_dir")
         if d and Path(d).exists():
@@ -486,7 +549,7 @@ class App:
 
     def _pokaz_foto(self) -> None:
         if not PIL_OK or not self._foto_lista:
-            self.foto.configure(image="", text="(brak zdjec - kliknij 'Szczegoly + zdjecia')")
+            self.foto.configure(image="", text="(brak zdjec dla tej oferty)")
             self._foto_ref = None
             self.foto_licznik.configure(text="")
             return
@@ -543,14 +606,19 @@ class App:
                 elif kind == "progress":
                     self._ustaw_postep(*payload)
                 elif kind == "offers":
-                    self._populate_tree(*payload)
+                    gen, *reszta = payload
+                    if gen == self._gen:                 # ignoruj wyniki starych zapytan
+                        self._populate_tree(*reszta)
+                elif kind == "enable":
                     self._set_running(False)
+                elif kind == "one_detail":
+                    self._zaktualizuj_detal(*payload)
                 elif kind == "done":
                     self._log(str(payload))
                     self._set_running(False)
                     self._set_status(str(payload))
                 elif kind == "done_refresh":
-                    self._log("Pobrano szczegoly. Odswiezam liste...")
+                    self._log("Gotowe. Odswiezam liste ofert...")
                     self._set_running(False)
                     self._pokaz_raport(cfg=payload)
                 elif kind == "error":
