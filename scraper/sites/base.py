@@ -54,18 +54,6 @@ class BaseScraper:
                     continue
                 for it in items:
                     collected.setdefault(it.key(), it)
-        return self._apply_price_filter(list(collected.values()))
-
-    def _apply_price_filter(self, listings: list[Listing]) -> list[Listing]:
-        lo, hi = self.config.cena_min, self.config.cena_max
-        if lo is None and hi is None:
-            return listings
-        out = []
-        for ls in listings:
-            if ls.price is not None:
-                if lo is not None and ls.price < lo:
-                    continue
-                if hi is not None and ls.price > hi:
-                    continue
-            out.append(ls)  # oferty bez ceny zostawiamy (nie gubimy potencjalnie trafnych)
-        return out
+        # Zapisujemy WSZYSTKO - filtrowanie po cenie/metrazu/pokojach odbywa sie
+        # na etapie raportu, dzieki czemu mozna zmieniac parametry bez re-scrapingu.
+        return list(collected.values())

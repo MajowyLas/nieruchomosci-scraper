@@ -24,6 +24,29 @@ def _data_pierwszego(row: sqlite3.Row) -> date:
     return datetime.fromisoformat(row["first_seen"]).date()
 
 
+def w_zakresie(wartosc, lo, hi) -> bool:
+    """Czy wartosc miesci sie w [lo, hi]? Nieznana (None) przechodzi - nie gubimy
+    ofert, w ktorych portal nie podal danej cechy (metraz/pokoje bywaja puste)."""
+    if wartosc is None:
+        return True
+    if lo is not None and wartosc < lo:
+        return False
+    if hi is not None and wartosc > hi:
+        return False
+    return True
+
+
+def filtruj_oferty(rows: list[sqlite3.Row], *, cena=(None, None),
+                   powierzchnia=(None, None), pokoje=(None, None)) -> list[sqlite3.Row]:
+    """Filtruje oferty wg parametrow z config.yaml (cena, metraz, liczba pokoi)."""
+    return [
+        r for r in rows
+        if w_zakresie(r["price"], *cena)
+        and w_zakresie(r["area"], *powierzchnia)
+        and w_zakresie(r["rooms"], *pokoje)
+    ]
+
+
 def naleznik_do_okna(data_pierwsza: date, dzis: date, kategoria: str) -> bool:
     """Czy oferta o dacie 'data_pierwsza' nalezy do okna 'kategoria'?
 

@@ -19,6 +19,14 @@ transakcja: sprzedaz
 cena_min:
 cena_max:
 
+# Powierzchnia uzytkowa / metraz w m2 (zostaw puste = bez limitu).
+powierzchnia_min:
+powierzchnia_max:
+
+# Liczba pokoi (zostaw puste = bez limitu).
+pokoje_min:
+pokoje_max:
+
 # Portale do przeszukania. Zakomentuj (#) te, ktorych nie chcesz.
 portale:
   - olx

@@ -49,6 +49,12 @@ def run_scrape(cfg: Config, db: Database) -> None:
 def run_report(cfg: Config, db: Database, kategoria: str, zapisz: str | None,
                bez_kolorow: bool, tylko_okazje: bool) -> None:
     rows = db.fetch_all(sites=cfg.portale, types=cfg.typy)
+    rows = report_mod.filtruj_oferty(
+        rows,
+        cena=(cfg.cena_min, cfg.cena_max),
+        powierzchnia=(cfg.powierzchnia_min, cfg.powierzchnia_max),
+        pokoje=(cfg.pokoje_min, cfg.pokoje_max),
+    )
     dzis = date.today()
     prog = cfg.okazja_prog_procent
     if not bez_kolorow:

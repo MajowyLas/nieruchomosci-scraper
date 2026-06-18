@@ -13,6 +13,10 @@ class Config:
     transakcja: str = "sprzedaz"
     cena_min: Optional[int] = None
     cena_max: Optional[int] = None
+    powierzchnia_min: Optional[float] = None
+    powierzchnia_max: Optional[float] = None
+    pokoje_min: Optional[int] = None
+    pokoje_max: Optional[int] = None
     portale: list[str] = field(default_factory=lambda: ["olx", "gratka", "nieruchomosci-online", "tarnowiak"])
     max_stron: int = 3
     opoznienie: float = 1.5
@@ -35,6 +39,10 @@ def load_config(path: str | Path = "config.yaml") -> Config:
         transakcja=str(raw.get("transakcja", "sprzedaz")).strip().lower(),
         cena_min=_as_int(raw.get("cena_min")),
         cena_max=_as_int(raw.get("cena_max")),
+        powierzchnia_min=_as_float(raw.get("powierzchnia_min")),
+        powierzchnia_max=_as_float(raw.get("powierzchnia_max")),
+        pokoje_min=_as_int(raw.get("pokoje_min")),
+        pokoje_max=_as_int(raw.get("pokoje_max")),
         portale=[str(s).strip().lower() for s in (raw.get("portale") or [])],
         max_stron=int(raw.get("max_stron", 3)),
         opoznienie=float(raw.get("opoznienie", 1.5)),
@@ -58,5 +66,14 @@ def _as_int(value) -> Optional[int]:
         return None
     try:
         return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _as_float(value) -> Optional[float]:
+    if value in (None, "", "null"):
+        return None
+    try:
+        return float(str(value).replace(",", "."))
     except (TypeError, ValueError):
         return None

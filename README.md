@@ -47,8 +47,12 @@ typy:                     # co scrapować
   - mieszkanie
   - dom
 transakcja: sprzedaz
-cena_min:                 # puste = bez limitu
+cena_min:                 # puste = bez limitu (zł)
 cena_max:
+powierzchnia_min:         # metraż użytkowy w m² (puste = bez limitu)
+powierzchnia_max:
+pokoje_min:               # liczba pokoi (puste = bez limitu)
+pokoje_max:
 portale:                  # zakomentuj (#) te, których nie chcesz
   - olx
   - gratka
@@ -58,6 +62,21 @@ max_stron: 3              # ile stron wyników pobrać z każdego portalu
 opoznienie: 1.5           # sekundy między zapytaniami (uprzejmość wobec serwerów)
 okazja_prog_procent: 85   # próg okazji: cena/m² < 85% mediany (≥15% taniej)
 ```
+
+### Parametry wyszukiwania
+
+| Parametr | Znaczenie |
+|----------|-----------|
+| `typy` | rodzaj nieruchomości: `mieszkanie` i/lub `dom` |
+| `cena_min` / `cena_max` | widełki ceny w zł |
+| `powierzchnia_min` / `powierzchnia_max` | metraż użytkowy w m² |
+| `pokoje_min` / `pokoje_max` | liczba pokoi |
+
+Filtry metrażu, pokoi i ceny są stosowane **na etapie raportu** — możesz je zmienić
+w `config.yaml` i od razu uruchomić raport ponownie, **bez ponownego scrapowania**
+(baza przechowuje pełny zrzut rynku). Oferta, w której portal **nie podał** danej
+cechy (np. brak liczby pokoi), nie jest odrzucana — żeby nie zgubić trafnych
+ogłoszeń z niekompletnymi danymi.
 
 ## Użycie
 
