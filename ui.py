@@ -180,8 +180,11 @@ class App:
         self.b_scrape = ttk.Button(btns, text="Pobierz dane z portali",
                                    command=lambda: self._start_scrape(False))
         self.b_raport = ttk.Button(btns, text="Pokaz oferty", command=self._pokaz_raport)
+        self.b_otworz_top = ttk.Button(btns, text="Otworz oferte w przegladarce",
+                                       command=self._otworz_oferte)
         self.b_scrape.pack(side="left", padx=(0, 4), pady=4)
         self.b_raport.pack(side="left", padx=4, pady=4)
+        self.b_otworz_top.pack(side="left", padx=4, pady=4)
         ttk.Separator(btns, orient="vertical").pack(side="left", fill="y", padx=12, pady=4)
         self.b_detale = ttk.Button(btns, text="Dociagnij zdjecia (wszystkie)", command=self._start_details)
         self.b_zapisz = ttk.Button(btns, text="Zapisz ustawienia", command=self._zapisz_config)
@@ -301,7 +304,7 @@ class App:
         akcje_of = ttk.Frame(prawy)
         akcje_of.pack(fill="x", pady=4)
         self.b_otworz = ttk.Button(akcje_of, text="Otworz w przegladarce",
-                                   command=self._otworz_oferte, state="disabled")
+                                   command=self._otworz_oferte)
         self.b_fav = ttk.Button(akcje_of, text="☆ Ulubione", command=self._toggle_fav, state="disabled")
         self.b_otworz.pack(side="left", padx=(0, 4))
         self.b_fav.pack(side="left")
@@ -661,8 +664,16 @@ class App:
         self._pokaz_foto()
 
     def _otworz_oferte(self) -> None:
-        if self._aktualny_url:
-            webbrowser.open(self._aktualny_url)
+        url = self._aktualny_url
+        if not url:  # nic nie kliknieto wczesniej - wez z biezacego zaznaczenia
+            sel = self.tree.selection()
+            if sel:
+                r = self._oferty.get(sel[0])
+                url = r.get("url") if r else None
+        if url:
+            webbrowser.open(url)
+        else:
+            messagebox.showinfo("Oferta", "Najpierw zaznacz oferte na liscie (kliknij wiersz).")
 
     # ================= mapa =================
     def _na_mapie(self) -> bool:
